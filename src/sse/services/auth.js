@@ -1,6 +1,6 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs } from "open-sse/services/accountFallback.js";
+import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs, buildModelFailureBackoffUpdate, buildClearModelFailureUpdate } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import * as log from "../utils/logger.js";
@@ -251,6 +251,16 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   if (lockConnection) {
     cooldownMs = resolveConnectionCooldownMs({ status, errorText: reasonText, cooldownMs, recentFailureCount });
   }
+
+  // Per-model consecutive-failure exponential backoff: a model that keeps
+  // dying gets blocked for base*2^(n-1), reset to base on a successful call.
+  let failureCounterUpdate = {};
+  if (!lockConnection && model) {
+    const backoff = buildModelFailureBackoffUpdate(conn, model);
+    cooldownMs = Math.max(cooldownMs || 0, backoff.cooldownMs);
+    failureCounterUpdate = backoff.update;
+  }
+
   const reason = reasonText.slice(0, 100);
   const lockUpdate = buildModelLockUpdate(lockConnection ? null : model, cooldownMs);
   const failureUpdate = (busyOrConcurrency || preflightTimeout)
@@ -272,6 +282,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   await updateProviderConnection(connectionId, {
     ...lockUpdate,
     ...failureUpdate,
+    ...failureCounterUpdate,
     testStatus: "unavailable",
     lastError: reason,
     errorCode: status,
@@ -326,6 +337,11 @@ export async function clearAccountError(connectionId, currentConnection, model =
   });
 
   const clearObj = Object.fromEntries(keysToClear.map(k => [k, null]));
+
+  // Reset the consecutive-failure counter for the model that just succeeded.
+  // Counters for other models are preserved so their backoff keeps escalating
+  // until they succeed too.
+  Object.assign(clearObj, buildClearModelFailureUpdate(conn, model));
 
   // Only reset error state if no active locks remain
   if (remainingActiveLocks.length === 0) {

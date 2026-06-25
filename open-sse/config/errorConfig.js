@@ -37,6 +37,14 @@ export const BACKOFF_CONFIG = {
 
 // Default cooldown for transient/unknown errors
 export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
+// Per-model consecutive-failure exponential backoff.
+// When a model cannot be called it is blocked for MODEL_FAILURE_BACKOFF_BASE_MS.
+// Each consecutive failure (no successful call in between) doubles the block
+// window, capped at MODEL_FAILURE_BACKOFF_MAX_MS. A successful call to that model
+// resets the counter so the next failure starts back at the base.
+export const MODEL_FAILURE_BACKOFF_BASE_MS = 30 * 1000;
+export const MODEL_FAILURE_BACKOFF_MAX_MS = 30 * 60 * 1000;
+
 
 // Short account/provider cooldown for busy or concurrency gates.
 export const BUSY_CONNECTION_COOLDOWN_MS = 30 * 1000;

@@ -1,4 +1,4 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, BUSY_CONNECTION_COOLDOWN_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, BUSY_CONNECTION_COOLDOWN_MS, MODEL_FAILURE_BACKOFF_BASE_MS, MODEL_FAILURE_BACKOFF_MAX_MS } from "../config/errorConfig.js";
 
 const BUSY_CONCURRENCY_TEXT = [
   "hệ thống đang bận",
@@ -200,6 +200,55 @@ export function buildClearModelLocksUpdate(connection) {
     if (key.startsWith(MODEL_LOCK_PREFIX)) cleared[key] = null;
   }
   return cleared;
+}
+
+/** Prefix for per-model consecutive-failure counters on a connection record.
+ *  Distinct from MODEL_LOCK_PREFIX so counters survive lock expiry and are
+ *  only cleared on a successful call to that model (not on auto-heal). */
+export const MODEL_FAILURE_PREFIX = "modelFailure_";
+export const MODEL_FAILURE_ALL = `${MODEL_FAILURE_PREFIX}__all`;
+
+/** Build the flat field key for a per-model failure counter. */
+export function getModelFailureKey(model) {
+  return model ? `${MODEL_FAILURE_PREFIX}${model}` : MODEL_FAILURE_ALL;
+}
+
+/** Read the stored consecutive-failure count for a model (or connection-level __all). */
+export function getModelFailureCount(connection, model) {
+  if (!connection) return 0;
+  const count = Number(connection[getModelFailureKey(model)]);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+/** Cooldown for the Nth consecutive failure: base * 2^(n-1), capped at max. */
+export function getModelBackoffCooldownMs(failureCount) {
+  const n = Math.max(1, failureCount);
+  const cooldown = MODEL_FAILURE_BACKOFF_BASE_MS * Math.pow(2, n - 1);
+  return Math.min(cooldown, MODEL_FAILURE_BACKOFF_MAX_MS);
+}
+
+/** Bump the per-model consecutive-failure counter and return the resulting
+ *  cooldown to apply as a model lock. Counters persist across lock expiry so
+ *  that repeated failures keep escalating until a successful call resets them. */
+export function buildModelFailureBackoffUpdate(connection, model) {
+  const count = getModelFailureCount(connection, model) + 1;
+  const cooldownMs = getModelBackoffCooldownMs(count);
+  return { count, cooldownMs, update: { [getModelFailureKey(model)]: count } };
+}
+
+/** Build update object that clears the per-model failure counter on success.
+ *  A specific model success clears only that model's counter; a model-less
+ *  success (fetch/search) clears the connection-level __all counter only. */
+export function buildClearModelFailureUpdate(connection, model) {
+  if (!connection) return {};
+  const update = {};
+  if (model) {
+    const key = getModelFailureKey(model);
+    if (connection[key] != null) update[key] = 0;
+  } else if (connection[MODEL_FAILURE_ALL] != null) {
+    update[MODEL_FAILURE_ALL] = 0;
+  }
+  return update;
 }
 
 /**
