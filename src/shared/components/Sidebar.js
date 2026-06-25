@@ -9,7 +9,7 @@ import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import Button from "./Button";
-import { ConfirmModal } from "./Modal";
+import Modal, { ConfirmModal } from "./Modal";
 import NineRemotePromoModal from "./NineRemotePromoModal";
 
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
@@ -46,6 +46,7 @@ export default function Sidebar({ onClose }) {
   const [versionInfo, setVersionInfo] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showAppUpdateModal, setShowAppUpdateModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
   const [enableTranslator, setEnableTranslator] = useState(false);
@@ -130,7 +131,18 @@ export default function Sidebar({ onClose }) {
               <h1 className="text-lg font-semibold tracking-tight text-text-main">
                 {APP_CONFIG.name}
               </h1>
-              <span className="text-xs text-text-muted">Version: {APP_CONFIG.version}{versionInfo?.hasAppUpdate ? ` (update: ${versionInfo?.githubLatestVersion})` : ""}</span>
+              <span className="text-xs text-text-muted">
+                Version: {APP_CONFIG.version}
+                {versionInfo?.hasAppUpdate ? (
+                  <button
+                    onClick={() => setShowAppUpdateModal(true)}
+                    title="View update instructions"
+                    className="inline-flex items-center gap-0.5 ml-1 text-green-600 dark:text-amber-500 font-semibold hover:underline cursor-pointer align-baseline"
+                  >
+                    (update: {versionInfo?.githubLatestVersion})
+                  </button>
+                ) : null}
+              </span>
               <span className="text-[11px] text-text-subtle">
                 Core: {APP_CONFIG.coreVersion}{versionInfo?.hasCoreUpdate ? ` (latest: ${versionInfo?.latestVersion})` : ""}
               </span>
@@ -352,6 +364,13 @@ export default function Sidebar({ onClose }) {
         variant="primary"
       />
 
+      {/* App Update Instructions Modal */}
+      <UpdateInstructionsModal
+        isOpen={showAppUpdateModal}
+        onClose={() => setShowAppUpdateModal(false)}
+        latestVersion={versionInfo?.githubLatestVersion}
+      />
+
       {/* Disconnected / Updating Overlay */}
       {(isDisconnected || isUpdating) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
@@ -444,4 +463,125 @@ ManualUpdatePanel.propTypes = {
   onCancel: PropTypes.func.isRequired,
   countdown: PropTypes.number,
   isDisconnected: PropTypes.bool,
+};
+
+
+function UpdateInstructionsModal({ isOpen, onClose, latestVersion }) {
+  const { copied, copy } = useCopyToClipboard(2000);
+  const [detectedOS, setDetectedOS] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const platform = navigator?.platform || navigator?.userAgent || "";
+    if (/Win/i.test(platform)) setDetectedOS("windows");
+    else if (/Mac/i.test(platform)) setDetectedOS("mac");
+    else setDetectedOS(null);
+  }, [isOpen]);
+
+  const cmd = UPDATER_CONFIG.installCmdLatest;
+
+  const platforms = [
+    {
+      id: "windows",
+      label: "Windows",
+      shell: "PowerShell",
+      icon: "terminal",
+      steps: [
+        "Open PowerShell (Win + X, then Terminal).",
+        "Paste the command below and press Enter.",
+        "Run routerdone again to start the updated server.",
+      ],
+    },
+    {
+      id: "mac",
+      label: "macOS",
+      shell: "Terminal",
+      icon: "keyboard_command_key",
+      steps: [
+        "Open Terminal (Cmd + Space, type Terminal).",
+        "Paste the command below and press Enter.",
+        "Run routerdone again to start the updated server.",
+      ],
+    },
+  ];
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={latestVersion ? `Update to v${latestVersion}` : "Update RouterDone"}
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <p className="text-sm text-text-muted mb-4">
+        A newer version is available. Copy the install command for your platform, run it in the matching shell, then restart RouterDone.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {platforms.map((p) => {
+          const isRecommended = detectedOS === p.id;
+          return (
+            <div
+              key={p.id}
+              className={cn(
+                "rounded-lg border p-4 flex flex-col gap-3",
+                isRecommended
+                  ? "border-primary/40 bg-primary/5"
+                  : "border-border-subtle bg-surface-2/40"
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[20px] text-text-main">{p.icon}</span>
+                  <div className="flex flex-col leading-tight">
+                    <span className="text-sm font-semibold text-text-main">{p.label}</span>
+                    <span className="text-[11px] text-text-muted">{p.shell}</span>
+                  </div>
+                </div>
+                {isRecommended && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                    Recommended
+                  </span>
+                )}
+              </div>
+
+              <div className="rounded bg-black/5 dark:bg-white/5 px-2.5 py-2">
+                <code className="text-[11px] font-mono text-text-main break-all">{cmd}</code>
+              </div>
+
+              <button
+                onClick={() => copy(cmd, p.id)}
+                className={cn(
+                  "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer",
+                  copied === p.id
+                    ? "bg-green-600 text-white"
+                    : "bg-primary text-white hover:bg-primary/90"
+                )}
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {copied === p.id ? "check" : "content_copy"}
+                </span>
+                {copied === p.id ? "Copied" : "Copy"}
+              </button>
+
+              <ol className="text-[11px] text-text-muted space-y-1 list-decimal list-inside">
+                {p.steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
+  );
+}
+
+UpdateInstructionsModal.propTypes = {
+  isOpen: PropTypes.bool,
+  onClose: PropTypes.func.isRequired,
+  latestVersion: PropTypes.string,
 };
