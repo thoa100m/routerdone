@@ -27,6 +27,20 @@ function colorLine(line) {
   return <span className={color}>{line}</span>;
 }
 
+const handleDownload = (logs) => {
+  const content = logs.join("\n");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const blob = new Blob([content ? `${content}\n` : ""], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `routerdone-console-log-${timestamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 export default function ConsoleLogClient() {
   const [logs, setLogs] = useState([]);
   const [connected, setConnected] = useState(false);
@@ -127,6 +141,9 @@ export default function ConsoleLogClient() {
               <span className="material-symbols-outlined pointer-events-none absolute right-2 text-[18px] text-text-muted">expand_more</span>
             </span>
           </label>
+          <Button size="sm" variant="outline" icon="download" onClick={() => handleDownload(logs)} disabled={logs.length === 0}>
+            Download
+          </Button>
           <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
             Clear old
           </Button>
