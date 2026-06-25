@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
@@ -132,17 +132,14 @@ export default function Sidebar({ onClose }) {
               </h1>
               <span className="text-xs text-text-muted">routerdone v{APP_CONFIG.gatewayVersion}</span>
               <span className="text-[11px] text-text-subtle">
-                RouterDone core v{versionInfo?.currentVersion || APP_CONFIG.version}
-                {versionInfo?.latestVersion && versionInfo.latestVersion !== versionInfo.currentVersion
-                  ? ` / latest v${versionInfo.latestVersion}`
-                  : ""}
+                Version: {APP_CONFIG.version}
               </span>
             </div>
           </Link>
           {updateInfo && (
             <div className="flex flex-col gap-1.5 rounded p-1 -m-1">
               <span className="text-xs font-semibold text-green-600 dark:text-amber-500">
-                ↑ RouterDone core update: v{updateInfo.latestVersion}
+                ↑ Core: {versionInfo?.currentVersion}
               </span>
               <div className="flex items-center gap-2">
                 <button
