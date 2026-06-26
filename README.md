@@ -1,9 +1,16 @@
 # RouterDone
 
-RouterDone is an OpenAI-compatible local AI gateway and routing dashboard. It lets you add upstream providers, create routing combos, expose `/v1/*` endpoints, and route helper models through a neutral fallback combo.
+OpenAI-compatible local AI gateway and routing dashboard. Add upstream providers, create routing combos, expose `/v1/*` endpoints, and route helper models through a neutral fallback combo.
 
-This repository is intended to be a clean public export. It contains no prior git history from the private `llmGateway` source repository.
-## One-Line Install
+**Language / Ngôn ngữ:** [English](#english) · [Tiếng Việt](#tiếng-việt)
+
+---
+
+## English
+
+RouterDone is an OpenAI-compatible local AI gateway and routing dashboard. Add upstream providers, create routing combos, expose `/v1/*` endpoints, and route helper models through a neutral fallback combo.
+
+### One-Line Install
 
 Linux / macOS (auto-clones, generates secrets, starts Docker):
 
@@ -17,11 +24,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/thoa100m/routerdone/main/install.ps1 | iex
 ```
 
-Options: `PORT` (default 20128), `DIR` (default routerdone), `INITIAL_PASSWORD` (auto if unset).
+Options: `PORT` (default 20128), `DIR` (default routerdone), `INITIAL_PASSWORD` (auto if unset). The admin password is printed at the end if it was auto-generated. Full per-scenario detail: `docs/INSTALL.md`.
 
-The admin password is printed at the end if it was auto-generated. Full per-scenario detail: `docs/INSTALL.md`.
-
-## Install Guide
+### Install Guide
 
 Detailed, step-by-step install for each scenario lives in `docs/INSTALL.md`:
 
@@ -33,7 +38,7 @@ Detailed, step-by-step install for each scenario lives in `docs/INSTALL.md`:
 
 The sections below are a fast path. Use the install guide for full per-scenario detail.
 
-## Quick Start With Docker Compose
+### Quick Start With Docker Compose
 
 1. Create an `.env` file:
 
@@ -74,7 +79,7 @@ http://localhost:20128
 curl http://localhost:20128/api/health
 ```
 
-## Local Development
+### Local Development
 
 ```bash
 npm install
@@ -94,14 +99,29 @@ npm run build
 npm run start
 ```
 
-## Basic API Flow
+### First Login And Usage
 
-1. Sign in with `INITIAL_PASSWORD`.
-2. Open the dashboard.
-3. Add a provider and credentials.
-4. Create a combo.
-5. Create or copy an API key.
-6. Call the OpenAI-compatible endpoint:
+After install, here is how to sign in and start using RouterDone.
+
+1. Open the app in your browser:
+
+```text
+http://localhost:20128
+```
+
+2. You land on the login page. Sign in with the admin password (`INITIAL_PASSWORD`). If the installer auto-generated it, the password was printed at the end of the install output.
+
+3. The dashboard opens. The sidebar lists the main areas: **Providers**, **Combos**, **Usage**, **Keys**, **CLI Tools**, **MITM**, **Profile**.
+
+4. Add a provider: open **Providers -> New**, enter the upstream base URL and API key, then save. Select the models you want to expose.
+
+5. Create a combo: open **Combos -> New**, give it a name (for example `helper.fallback`), add one or more models from your providers, and set the fallback order.
+
+6. Create an API key: open **Keys** (or **Profile**), create a key, and copy it. This is the `YOUR_ROUTERDONE_API_KEY` your clients will use.
+
+7. Optional: set up Model Redirect in **Dashboard -> Profile -> Model Redirect** and point auxiliary model names at `helper.fallback`.
+
+8. Call the OpenAI-compatible endpoint with that key:
 
 ```bash
 curl http://localhost:20128/v1/chat/completions \
@@ -113,7 +133,7 @@ curl http://localhost:20128/v1/chat/completions \
   }'
 ```
 
-## Model Redirect
+### Model Redirect
 
 RouterDone supports model redirects for helper or auxiliary model names. A redirect maps one incoming model name to another model or combo.
 
@@ -131,9 +151,9 @@ Recommended setup:
 4. Open `Dashboard -> Profile -> Model Redirect`.
 5. Keep or add redirects that point auxiliary models to `helper.fallback`.
 
-Do not hardcode private combo names in a public deployment. Use neutral names such as `helper.fallback`, `coding.fallback`, or `vision.fallback`.
+Use neutral combo names such as `helper.fallback`, `coding.fallback`, or `vision.fallback`.
 
-## Docker Compose
+### Docker Compose
 
 The included `docker-compose.yml` persists:
 
@@ -164,7 +184,7 @@ ENABLE_REQUEST_LOGS=false
 OBSERVABILITY_ENABLED=true
 ```
 
-## Dokploy
+### Dokploy
 
 Use the repository as a Docker Compose app in Dokploy.
 
@@ -185,32 +205,7 @@ BASE_URL=https://your-domain.example
 NEXT_PUBLIC_BASE_URL=https://your-domain.example
 ```
 
-## Data And Privacy
-
-Do not commit:
-
-```text
-.env
-data/
-logs/
-.next/
-node_modules/
-*.sqlite
-*.db
-downloads/
-screenshots/
-```
-
-Before publishing, run:
-
-```bash
-rg -n -i "biz100m|llmgateway|thoa100m|llm\.biz100m|gpt-5\.5\.fallback" .
-rg -n -i "sk-[a-z0-9_-]{16,}|api[_-]?key|oauth.*secret|password|token" .
-```
-
-Expected result: no private owner names, no real secrets, no private domains.
-
-## Build
+### Build
 
 ```bash
 docker build -t routerdone .
@@ -227,30 +222,244 @@ curl http://localhost:20128/api/health
 curl http://localhost:20128/v1/models -H "Authorization: Bearer YOUR_ROUTERDONE_API_KEY"
 ```
 
-## Updating From Upstream
-
-RouterDone keeps update rules in one place:
-
-```text
-maintenance/routerdone-update/
-```
-
-When upstream 9Router releases a new version, start with:
-
-```powershell
-.\maintenance\routerdone-update\sync-routerdone-from-9router.ps1 -DryRun
-```
-
-Then follow `README.md`, `PATCH_ORDER.md`, `REBRAND_RULES.md`, and `VERIFY_CHECKLIST.md` in that folder before publishing.
-
-## License
+### License
 
 MIT. Keep upstream attribution in `LICENSE`.
 
-## Credits
+### Credits
 
-RouterDone is a fork of [9Router](https://github.com/decolua/9router) by decolua, rebuilt as a clean public distribution under the RouterDone brand.
+RouterDone is rebuilt as a clean public distribution under the RouterDone brand.
 
-On top of upstream it adds and ships extra improvements: progressive/scored request token compression (RTK), provider auto-heal, quota auto-manage, adaptive timeouts, runtime observability, combo stream-error fallback, tool-call argument sanitization, output-text normalization, and a configurable Model Redirect for helper/auxiliary models.
+It adds and ships extra improvements: progressive/scored request token compression (RTK), provider auto-heal, quota auto-manage, adaptive timeouts, runtime observability, combo stream-error fallback, tool-call argument sanitization, output-text normalization, and a configurable Model Redirect for helper/auxiliary models.
 
-Upstream license and attribution are preserved in `LICENSE`.
+License and attribution are preserved in `LICENSE`.
+
+---
+
+## Tiếng Việt
+
+RouterDone là cổng gateway AI nội bộ tương thích OpenAI và bảng điều khiển định tuyến. Bạn có thể thêm provider upstream, tạo combo định tuyến, mở các endpoint `/v1/*`, và định tuyến model phụ trợ qua combo fallback trung lập.
+
+### Cài đặt một dòng
+
+Linux / macOS (tự clone, tạo secret, khởi động Docker):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thoa100m/routerdone/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/thoa100m/routerdone/main/install.ps1 | iex
+```
+
+Tùy chọn: `PORT` (mặc định 20128), `DIR` (mặc định routerdone), `INITIAL_PASSWORD` (tự sinh nếu để trống). Mật khẩu quản trị được in ở cuối nếu được tự sinh. Chi tiết theo từng trường hợp xem tại `docs/INSTALL.md`.
+
+### Hướng dẫn cài đặt
+
+Hướng dẫn cài đặt chi tiết từng bước cho từng trường hợp nằm trong `docs/INSTALL.md`:
+
+- Máy cá nhân (Docker): `docs/INSTALL.md` Scenario A
+- VPS / server (Docker, public + HTTPS): `docs/INSTALL.md` Scenario B
+- Dokploy (Compose quản lý): `docs/INSTALL.md` Scenario C và `docs/DOKPLOY.md`
+- Phát triển cục bộ từ mã nguồn: `docs/INSTALL.md` Scenario D
+- Phiên bản và cập nhật: `docs/INSTALL.md` Versions And Updating
+
+Phần dưới đây là đường tắt. Dùng hướng dẫn cài đặt để có chi tiết đầy đủ theo từng trường hợp.
+
+### Khởi động nhanh với Docker Compose
+
+1. Tạo file `.env`:
+
+```bash
+cp .env.example .env
+```
+
+2. Thay các secret bắt buộc:
+
+```bash
+JWT_SECRET=$(openssl rand -hex 32)
+INITIAL_PASSWORD=change-this-admin-password
+API_KEY_SECRET=$(openssl rand -hex 32)
+MACHINE_ID_SALT=$(openssl rand -hex 32)
+```
+
+Trên Windows PowerShell:
+
+```powershell
+$env:JWT_SECRET = -join ((1..64) | ForEach-Object { "{0:x}" -f (Get-Random -Max 16) })
+```
+
+3. Khởi động RouterDone:
+
+```bash
+docker compose up --build -d
+```
+
+4. Mở:
+
+```text
+http://localhost:20128
+```
+
+5. Kiểm tra sức khỏe:
+
+```bash
+curl http://localhost:20128/api/health
+```
+
+### Phát triển cục bộ
+
+```bash
+npm install
+npm run dev
+```
+
+URL dev mặc định:
+
+```text
+http://localhost:20128
+```
+
+Build production:
+
+```bash
+npm run build
+npm run start
+```
+
+### Đăng nhập và sử dụng sau khi cài
+
+Sau khi cài xong, đây là cách đăng nhập và bắt đầu dùng RouterDone.
+
+1. Mở ứng dụng trong trình duyệt:
+
+```text
+http://localhost:20128
+```
+
+2. Bạn sẽ thấy trang đăng nhập. Đăng nhập bằng mật khẩu quản trị (`INITIAL_PASSWORD`). Nếu trình cài đặt tự sinh mật khẩu, nó đã được in ở cuối output cài đặt.
+
+3. Dashboard mở ra. Thanh bên có các khu vực chính: **Providers**, **Combos**, **Usage**, **Keys**, **CLI Tools**, **MITM**, **Profile**.
+
+4. Thêm provider: mở **Providers -> New**, nhập upstream base URL và API key, rồi lưu. Chọn các model bạn muốn mở.
+
+5. Tạo combo: mở **Combos -> New**, đặt tên (ví dụ `helper.fallback`), thêm một hoặc nhiều model từ provider, và thiết lập thứ tự fallback.
+
+6. Tạo API key: mở **Keys** (hoặc **Profile**), tạo key và sao chép. Đây là `YOUR_ROUTERDONE_API_KEY` mà các client của bạn sẽ dùng.
+
+7. Tùy chọn: thiết lập Model Redirect trong **Dashboard -> Profile -> Model Redirect** và trỏ các tên model phụ trợ tới `helper.fallback`.
+
+8. Gọi endpoint tương thích OpenAI với key đó:
+
+```bash
+curl http://localhost:20128/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_ROUTERDONE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "your-provider/your-model",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+### Model Redirect
+
+RouterDone hỗ trợ chuyển hướng model cho các tên model phụ trợ. Một redirect ánh xạ tên model đầu vào sang một model hoặc combo khác.
+
+Mặc định công khai:
+
+```text
+gpt-5.4-mini -> helper.fallback
+```
+
+Thiết lập khuyến nghị:
+
+1. Thêm một hoặc nhiều provider.
+2. Tạo combo tên `helper.fallback`.
+3. Đặt một model phụ trợ rẻ và sẵn có vào combo đó.
+4. Mở `Dashboard -> Profile -> Model Redirect`.
+5. Giữ hoặc thêm redirect trỏ model phụ trợ tới `helper.fallback`.
+
+Dùng tên combo trung lập như `helper.fallback`, `coding.fallback`, hoặc `vision.fallback`.
+
+### Docker Compose
+
+File `docker-compose.yml` đi kèm lưu trữ:
+
+```text
+/app/data
+/app/data-home
+```
+
+Biến môi trường bắt buộc:
+
+```text
+JWT_SECRET
+INITIAL_PASSWORD
+API_KEY_SECRET
+MACHINE_ID_SALT
+```
+
+Biến môi trường phổ biến:
+
+```text
+PORT=20128
+NODE_ENV=production
+TZ=UTC
+BASE_URL=http://localhost:20128
+NEXT_PUBLIC_BASE_URL=http://localhost:20128
+REQUIRE_API_KEY=false
+ENABLE_REQUEST_LOGS=false
+OBSERVABILITY_ENABLED=true
+```
+
+### Dokploy
+
+Dùng repo như một ứng dụng Docker Compose trong Dokploy.
+
+1. Tạo ứng dụng Dokploy mới.
+2. Chọn Docker Compose.
+3. Dùng `docker-compose.yml`.
+4. Đặt biến môi trường từ `.env.example`.
+5. Đặt `BASE_URL` và `NEXT_PUBLIC_BASE_URL` thành URL công khai của app.
+6. Dùng volume cố định cho `/app/data` và `/app/data-home`.
+7. Triển khai, rồi kiểm tra `/api/health`.
+
+Cho triển khai HTTPS công khai:
+
+```text
+AUTH_COOKIE_SECURE=true
+REQUIRE_API_KEY=true
+BASE_URL=https://your-domain.example
+NEXT_PUBLIC_BASE_URL=https://your-domain.example
+```
+
+### Build
+
+```bash
+docker build -t routerdone .
+docker run --rm -p 20128:20128 --env-file .env \
+  -v routerdone-data:/app/data \
+  -v routerdone-data-home:/app/data-home \
+  routerdone
+```
+
+Kiểm tra nhanh:
+
+```bash
+curl http://localhost:20128/api/health
+curl http://localhost:20128/v1/models -H "Authorization: Bearer YOUR_ROUTERDONE_API_KEY"
+```
+
+### Giấy phép
+
+MIT. Giữ attribution upstream trong `LICENSE`.
+
+### Ghi nhận
+
+RouterDone được dựng lại thành bản phân phối công khai sạch dưới thương hiệu RouterDone.
+
+RouterDone thêm và phát hành các cải tiến: nén token request dạng progressive/scored (RTK), tự phục hồi provider, tự quản lý quota, timeout thích ứng, quan sát runtime, fallback lỗi stream combo, làm sạch tham số tool-call, chuẩn hóa output-text, và Model Redirect cấu hình được cho các model phụ trợ.
+
+Giấy phép và attribution được giữ trong `LICENSE`.
