@@ -70,7 +70,7 @@ docker compose up --build -d
 4. Open:
 
 ```text
-http://localhost:20128
+http://localhost:20128/admin
 ```
 
 5. Health check:
@@ -106,7 +106,7 @@ After install, here is how to sign in and start using RouterDone.
 1. Open the app in your browser:
 
 ```text
-http://localhost:20128
+http://localhost:20128/admin
 ```
 
 2. You land on the login page. Sign in with the admin password (`INITIAL_PASSWORD`). If the installer auto-generated it, the password was printed at the end of the install output.
@@ -300,7 +300,7 @@ docker compose up --build -d
 4. Mở:
 
 ```text
-http://localhost:20128
+http://localhost:20128/admin
 ```
 
 5. Kiểm tra sức khỏe:
@@ -336,7 +336,7 @@ Sau khi cài xong, đây là cách đăng nhập và bắt đầu dùng RouterDo
 1. Mở ứng dụng trong trình duyệt:
 
 ```text
-http://localhost:20128
+http://localhost:20128/admin
 ```
 
 2. Bạn sẽ thấy trang đăng nhập. Đăng nhập bằng mật khẩu quản trị (`INITIAL_PASSWORD`). Nếu trình cài đặt tự sinh mật khẩu, nó đã được in ở cuối output cài đặt.
