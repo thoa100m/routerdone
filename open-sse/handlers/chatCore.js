@@ -23,6 +23,7 @@ import { dedupeTools } from "../utils/toolDeduper.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { injectPonytail } from "../rtk/ponytail.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
+import { guardContext, formatContextGuardLog, estimateInputTokens } from "../rtk/contextGuard.js";
 import { compressWithHeadroom, formatHeadroomLog } from "../rtk/headroom.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
@@ -35,7 +36,7 @@ import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
  * @param {object} options.credentials - Provider credentials
  * @param {string} options.sourceFormatOverride - Override detected source format (e.g. "openai-responses")
  */
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, sourceFormatOverride, providerThinking, routeInfo = null, streamTimeoutPolicy = null, streamPreflightTimeoutMs = null }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, contextGuardEnabled, contextGuardMaxBytes, contextGuardKeepRecent, contextGuardHardCapTokens, sourceFormatOverride, providerThinking, routeInfo = null, streamTimeoutPolicy = null, streamPreflightTimeoutMs = null }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
   const routeMode = routeInfo?.routeMode || (routeInfo?.comboName ? "combo" : "direct");
@@ -169,10 +170,35 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const rtkLine = formatRtkLog(rtkStats);
   if (rtkLine) console.log(rtkLine);
 
+  // Context guard: evict old reasoning encrypted_content blobs when body exceeds
+  // a byte threshold. Prevents long agentic sessions from overflowing upstream
+  // context windows (the >1M-token input problem).
+  const isCompact = !!body._compact;
+  const ctxGuardStats = guardContext(translatedBody, {
+    enabled: contextGuardEnabled !== false,
+    maxBytes: contextGuardMaxBytes,
+    keepRecent: contextGuardKeepRecent,
+    isCompact,
+  });
+  const ctxGuardLine = formatContextGuardLog(ctxGuardStats);
+  if (ctxGuardLine) console.log(ctxGuardLine);
+
   // Headroom: optional external proxy compression; fail open if proxy is absent.
   const headroomStats = await compressWithHeadroom(translatedBody, { enabled: headroomEnabled, url: headroomUrl, model: upstreamModel, format: finalFormat, compressUserMessages: headroomCompressUserMessages });
   const headroomLine = formatHeadroomLog(headroomStats);
   if (headroomLine) log?.info?.("HEADROOM", headroomLine);
+
+  // Input size verification: estimate input tokens after all token savers.
+  // Logs per-request input size for monitoring and enforces a hard cap that
+  // signals compact when the conversation exceeds the model context window.
+  const estInputTokens = estimateInputTokens(translatedBody);
+  const modelCtxWindow = getCapabilitiesForModel(provider, upstreamModel).contextWindow || 200000;
+  const hardCapTokens = contextGuardHardCapTokens > 0 ? contextGuardHardCapTokens : Math.floor(modelCtxWindow * 0.85);
+  console.log(`[CTX-GUARD] input ~${estInputTokens} tokens | cap ${hardCapTokens} (ctx ${modelCtxWindow})${isCompact ? " | compact" : ""}`);
+  if (estInputTokens > hardCapTokens && !isCompact) {
+    log?.warn?.("CTX-GUARD", `input ${estInputTokens} tokens exceeds hard cap ${hardCapTokens} — signaling compact`);
+    return createErrorResult(HTTP_STATUS.BAD_REQUEST, `context_too_large: estimated ${estInputTokens} input tokens exceed the ${hardCapTokens} hard cap for ${upstreamModel}. Reduce conversation context (run /compact) before continuing.`);
+  }
 
   // Caveman: inject terse-style system prompt
   if (cavemanEnabled && cavemanLevel) {

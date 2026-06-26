@@ -1,4 +1,4 @@
-﻿import { getAdapter } from "../driver.js";
+import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
@@ -36,6 +36,10 @@ const DEFAULT_SETTINGS = {
   cavemanLevel: "full",
   ponytailEnabled: false,
   ponytailLevel: "full",
+  contextGuardEnabled: true,
+  contextGuardMaxBytes: 3_500_000,
+  contextGuardKeepRecent: 8,
+  contextGuardHardCapTokens: 0,
   consoleLogRetentionMs: 60 * 60 * 1000,
   modelRedirects: {
     "gpt-5.4-mini": "helper.fallback",
