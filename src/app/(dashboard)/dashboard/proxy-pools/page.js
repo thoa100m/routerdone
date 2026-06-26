@@ -27,6 +27,23 @@ function normalizeFormData(data = {}) {
   };
 }
 
+const PROXY_POOLS_CACHE_KEY = "routerdone:proxy-pools-page";
+
+function readProxyPoolsCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PROXY_POOLS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeProxyPoolsCache(data) {
+  if (typeof window === "undefined" || !data) return;
+  try {
+    window.localStorage.setItem(PROXY_POOLS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
+
 export default function ProxyPoolsPage() {
   const [proxyPools, setProxyPools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,12 +83,23 @@ export default function ProxyPoolsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showRelayMenu]);
 
+  // Instant cache hydration ? show last-known pools immediately, refresh in background
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    const cached = readProxyPoolsCache();
+    if (cached?.data?.proxyPools) {
+      setProxyPools(cached.data.proxyPools);
+      setLoading(false);
+    }
+  }, []);
+
   const fetchProxyPools = useCallback(async () => {
     try {
       const res = await fetch("/api/proxy-pools?includeUsage=true", { cache: "no-store" });
       const data = await res.json();
       if (res.ok) {
         setProxyPools(data.proxyPools || []);
+        writeProxyPoolsCache({ proxyPools: data.proxyPools || [] });
       }
     } catch (error) {
       console.log("Error fetching proxy pools:", error);

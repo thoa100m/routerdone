@@ -14,6 +14,23 @@ const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 const DEFAULT_COMBO_RETRY_ATTEMPTS = 0;
 const DEFAULT_COMBO_RETRY_DELAY_MS = 1000;
 
+const COMBOS_CACHE_KEY = 'routerdone:combos-page';
+
+function readCombosCache() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(COMBOS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeCombosCache(data) {
+  if (typeof window === 'undefined' || !data) return;
+  try {
+    window.localStorage.setItem(COMBOS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
+
 export default function CombosPage() {
   const [combos, setCombos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +41,18 @@ export default function CombosPage() {
   const [modelCaps, setModelCaps] = useState({});
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
+
+  // Instant cache hydrate - show last data immediately while fresh fetch runs
+  useEffect(() => {
+    const cached = readCombosCache();
+    if (cached?.data) {
+      setCombos(cached.data.combos || []);
+      setActiveProviders(cached.data.activeProviders || []);
+      setComboStrategies(cached.data.comboStrategies || {});
+      setModelCaps(cached.data.modelCaps || {});
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -54,6 +83,12 @@ export default function CombosPage() {
         setModelCaps(map);
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      writeCombosCache({
+        combos: (combosData.combos || []).filter(c => !c.kind || c.kind === 'llm'),
+        activeProviders: providersRes.ok ? (providersData.connections || []) : [],
+        comboStrategies: settingsData.comboStrategies || {},
+        modelCaps,
+      });
     } catch (error) {
       console.log("Error fetching data:", error);
     } finally {

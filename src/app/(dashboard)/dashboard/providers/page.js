@@ -95,6 +95,22 @@ function getConnectionErrorTag(connection) {
 
 const APIKEY_INITIAL_VISIBLE = 20;
 
+const PROVIDERS_CACHE_KEY = 'routerdone:providers-page';
+
+function readProvidersCache() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PROVIDERS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeProvidersCache(data) {
+  if (typeof window === 'undefined' || !data) return;
+  try {
+    window.localStorage.setItem(PROVIDERS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
 export default function ProvidersPage() {
   const [connections, setConnections] = useState([]);
   const [providerNodes, setProviderNodes] = useState([]);
@@ -145,6 +161,16 @@ export default function ProvidersPage() {
       return (a.name || "").localeCompare(b.name || "");
     });
 
+  // Instant cache hydrate - show last data immediately while fresh fetch runs
+  useEffect(() => {
+    const cached = readProvidersCache();
+    if (cached?.data) {
+      setConnections(cached.data.connections || []);
+      setProviderNodes(cached.data.providerNodes || []);
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -157,6 +183,10 @@ export default function ProvidersPage() {
         if (connectionsRes.ok)
           setConnections(connectionsData.connections || []);
         if (nodesRes.ok) setProviderNodes(nodesData.nodes || []);
+        writeProvidersCache({
+          connections: connectionsRes.ok ? (connectionsData.connections || []) : [],
+          providerNodes: nodesRes.ok ? (nodesData.nodes || []) : [],
+        });
       } catch (error) {
         console.log("Error fetching data:", error);
       } finally {

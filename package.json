@@ -1,11 +1,11 @@
 {
   "name": "routerdone-app",
-  "version": "0.5.33",
+  "version": "0.5.34",
   "description": "OpenAI-compatible local AI gateway and routing dashboard",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack --port 20128",
-    "build": "next build --webpack",
+    "build": "node scripts/next-build.mjs",
     "start": "next start -p 20128",
     "dev:bun": "bun --bun next dev --webpack --port 20128",
     "build:bun": "bun --bun next build --webpack",

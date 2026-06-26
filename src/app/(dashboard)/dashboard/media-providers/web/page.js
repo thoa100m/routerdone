@@ -143,10 +143,37 @@ function Section({ title, icon, kind, providers, connections, combos, onCreateCo
   );
 }
 
+const WEB_PROVIDERS_CACHE_KEY = "routerdone:media-providers-web";
+
+function readWebProvidersCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(WEB_PROVIDERS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeWebProvidersCache(data) {
+  if (typeof window === "undefined" || !data) return;
+  try {
+    window.localStorage.setItem(WEB_PROVIDERS_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
+
 export default function WebProvidersPage() {
   const router = useRouter();
   const [connections, setConnections] = useState([]);
   const [combos, setCombos] = useState([]);
+
+  // Instant cache hydration ? show last-known data immediately, refresh in background
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    const cached = readWebProvidersCache();
+    if (cached?.data) {
+      if (cached.data.connections) setConnections(cached.data.connections);
+      if (cached.data.combos) setCombos(cached.data.combos);
+    }
+  }, []);
 
   const fetchAll = async () => {
     try {
@@ -154,8 +181,11 @@ export default function WebProvidersPage() {
         fetch("/api/providers", { cache: "no-store" }),
         fetch("/api/combos", { cache: "no-store" }),
       ]);
-      if (connsRes.ok) setConnections((await connsRes.json()).connections || []);
-      if (combosRes.ok) setCombos((await combosRes.json()).combos || []);
+      const conns = connsRes.ok ? (await connsRes.json()).connections || [] : [];
+      const combs = combosRes.ok ? (await combosRes.json()).combos || [] : [];
+      setConnections(conns);
+      setCombos(combs);
+      writeWebProvidersCache({ connections: conns, combos: combs });
     } catch { /* noop */ }
   };
 

@@ -137,6 +137,23 @@ function ComboList({ combos }) {
   );
 }
 
+const MEDIA_PROVIDERS_KIND_CACHE_KEY = "routerdone:media-providers-kind";
+
+function readMediaProvidersCache() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(MEDIA_PROVIDERS_KIND_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeMediaProvidersCache(data) {
+  if (typeof window === "undefined" || !data) return;
+  try {
+    window.localStorage.setItem(MEDIA_PROVIDERS_KIND_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {}
+}
+
 export default function MediaProviderKindPage() {
   const { kind } = useParams();
   const router = useRouter();
@@ -144,6 +161,17 @@ export default function MediaProviderKindPage() {
   const [customNodes, setCustomNodes] = useState([]);
   const [combos, setCombos] = useState([]);
   const [showAddCustomEmbedding, setShowAddCustomEmbedding] = useState(false);
+
+  // Instant cache hydration ? show last-known data immediately, refresh in background
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    const cached = readMediaProvidersCache();
+    if (cached?.data) {
+      if (cached.data.connections) setConnections(cached.data.connections);
+      if (cached.data.customNodes) setCustomNodes(cached.data.customNodes);
+      if (cached.data.combos) setCombos(cached.data.combos);
+    }
+  }, []);
 
   // webSearch/webFetch listing pages are merged into /web
   useEffect(() => {
@@ -160,18 +188,33 @@ export default function MediaProviderKindPage() {
     if (!kindConfig) return;
     fetch("/api/providers", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => setConnections(d.connections || []))
+      .then((d) => {
+        const conns = d.connections || [];
+        setConnections(conns);
+        const prev = readMediaProvidersCache()?.data || {};
+        writeMediaProvidersCache({ ...prev, connections: conns });
+      })
       .catch(() => {});
     if (isEmbedding) {
       fetch("/api/provider-nodes", { cache: "no-store" })
         .then((r) => r.json())
-        .then((d) => setCustomNodes((d.nodes || []).filter((n) => n.type === "custom-embedding")))
+        .then((d) => {
+          const nodes = (d.nodes || []).filter((n) => n.type === "custom-embedding");
+          setCustomNodes(nodes);
+          const prev = readMediaProvidersCache()?.data || {};
+          writeMediaProvidersCache({ ...prev, customNodes: nodes });
+        })
         .catch(() => {});
     }
     if (supportsCombo) {
       fetch("/api/combos", { cache: "no-store" })
         .then((r) => r.json())
-        .then((d) => setCombos(d.combos || []))
+        .then((d) => {
+          const combs = d.combos || [];
+          setCombos(combs);
+          const prev = readMediaProvidersCache()?.data || {};
+          writeMediaProvidersCache({ ...prev, combos: combs });
+        })
         .catch(() => {});
     }
   }, [isEmbedding, supportsCombo, kindConfig]);
