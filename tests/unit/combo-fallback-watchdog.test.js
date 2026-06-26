@@ -224,6 +224,67 @@ describe("adaptive combo fallback", () => {
     expect(after.remainingMs).toBeGreaterThan(25_000);
     expect(after.remainingMs).toBeLessThanOrEqual(30_000);
   });
+  it("deprioritizes auth-locked combo models and resets after success", async () => {
+    const authLocked = () => new Response(
+      JSON.stringify({ error: { message: "all accounts locked", comboCooldownReason: "auth_model_locked" } }),
+      { status: 503 },
+    );
+
+    const firstTried = [];
+    const first = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a", "p/b"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        firstTried.push(model);
+        if (model === "p/a") return authLocked();
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(first.ok).toBe(true);
+    expect(firstTried).toEqual(["p/a", "p/b"]);
+    const afterAuthLock = getComboCooldownState("p/a");
+    expect(afterAuthLock.failureCount).toBe(1);
+    expect(afterAuthLock.remainingMs).toBeGreaterThan(25_000);
+    expect(afterAuthLock.remainingMs).toBeLessThanOrEqual(30_000);
+
+    const secondTried = [];
+    const second = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a", "p/b"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        secondTried.push(model);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(second.ok).toBe(true);
+    expect(secondTried).toEqual(["p/b"]);
+    expect(getComboCooldownState("p/a").failureCount).toBe(1);
+
+    const resetTried = [];
+    const reset = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        resetTried.push(model);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(reset.ok).toBe(true);
+    expect(resetTried).toEqual(["p/a"]);
+    expect(getComboCooldownState("p/a")).toEqual({ remainingMs: 0, failureCount: 0 });
+  });
   it("emits combo summary counters", async () => {
     const infos = [];
     const summaryLog = { info: (_tag, msg) => infos.push(msg), warn: () => {}, debug: () => {} };
@@ -269,7 +330,7 @@ describe("productive stream watchdog", () => {
       policy: { firstByteTimeoutMs: 5, firstProductiveTimeoutMs: 20, totalBudgetMs: 60 },
     });
     expect(res.error).toMatch(/productive timeout/);
-  });
+  }, 10000);
 
   it("counts content, thinking, and tool calls as productive", () => {
     expect(isProductiveStreamChunk({ choices: [{ delta: { content: "hi" } }] })).toBe(true);

@@ -97,6 +97,9 @@ function isPreflightTimeoutText(errorText) {
   const text = String(errorText || "").toLowerCase();
   return text.includes("upstream first byte timeout") || text.includes("upstream first productive timeout");
 }
+function isAuthLockedComboError(errorBody) {
+  return errorBody?.error?.comboCooldownReason === "auth_model_locked" || errorBody?.error?.code === "all_accounts_locked";
+}
 
 // Flatten tool turns into prose so panel models keep the context but can't loop
 // on tools: drop the request's tools, turn tool/function results into assistant
@@ -441,8 +444,9 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Extract error info from response
       let errorText = result.statusText || "";
       let retryAfter = null;
+      let errorBody = null;
       try {
-        const errorBody = await result.clone().json();
+        errorBody = await result.clone().json();
         errorText = errorBody?.error?.message || errorBody?.error || errorBody?.message || errorText;
         retryAfter = errorBody?.retryAfter || null;
       } catch {
@@ -465,6 +469,13 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         const cooldownUntil = markComboCooldown(modelStr);
         if (cooldownUntil) {
           log.warn("COMBO", `${comboLogPrefix} | cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)} reason=preflight_timeout`, { status: result.status });
+        }
+      }
+
+      if (isAuthLockedComboError(errorBody)) {
+        const cooldownUntil = markComboCooldown(modelStr);
+        if (cooldownUntil) {
+          log.warn("COMBO", `${comboLogPrefix} | cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)} reason=auth_model_locked`, { status: result.status });
         }
       }
 
