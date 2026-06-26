@@ -296,6 +296,19 @@ export function createSSEStream(options = {}) {
         const extracted = extractUsage(parsed);
         if (extracted) state.usage = extracted; // Keep original usage for logging
 
+        // OpenAI Responses format (same-format passthrough): delta is a string.
+        // Accumulate so totalContentLength > 0 enables the usage-estimate fallback
+        // and Recent Requests gets a row even when upstream omits usage.
+        if (typeof parsed.delta === "string" && parsed.delta) {
+          if (parsed.type === "response.output_text.delta") {
+            totalContentLength += parsed.delta.length;
+            accumulatedContent += parsed.delta;
+          } else if (parsed.type === "response.reasoning_summary_text.delta" || parsed.type === "response.reasoning_text.delta") {
+            totalContentLength += parsed.delta.length;
+            accumulatedThinking += parsed.delta;
+          }
+        }
+
         // Responses same-format passthrough: re-emit with original event framing
         if (keepsOpenAIResponsesFormat && openAIResponsesEventName) {
           const output = formatSSE({ event: openAIResponsesEventName, data: parsed }, sourceFormat);
