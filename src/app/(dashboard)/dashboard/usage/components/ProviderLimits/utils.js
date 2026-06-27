@@ -22,6 +22,25 @@ export const QUOTA_SORT_OPTIONS = [
   { value: "remaining-desc", label: "% quota: high to low" },
 ];
 
+export function getEarliestQuotaResetMs(quotaEntry) {
+  const quotas = Array.isArray(quotaEntry?.quotas)
+    ? quotaEntry.quotas
+    : Object.values(quotaEntry?.quotas || {});
+  const resetTimes = quotas
+    .map((quota) => {
+      const time = quota?.resetAt ? new Date(quota.resetAt).getTime() : NaN;
+      return Number.isFinite(time) ? time : null;
+    })
+    .filter((time) => time && time > 0);
+
+  return resetTimes.length > 0 ? Math.min(...resetTimes) : null;
+}
+
+export function isQuotaCacheEntryExpired(quotaEntry, now = Date.now()) {
+  const resetMs = getEarliestQuotaResetMs(quotaEntry);
+  return Boolean(resetMs && now >= resetMs);
+}
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 export function getConnectionLabel(connection) {
   return connection.name?.trim()
@@ -188,7 +207,24 @@ export function getQuotaCache() {
   if (typeof window === "undefined") return {};
   try {
     const cached = window.localStorage.getItem(QUOTA_CACHE_KEY);
-    return cached ? JSON.parse(cached) : {};
+    const parsed = cached ? JSON.parse(cached) : {};
+    const now = Date.now();
+    const valid = {};
+    let pruned = false;
+
+    for (const [connectionId, quotaEntry] of Object.entries(parsed)) {
+      if (isQuotaCacheEntryExpired(quotaEntry, now)) {
+        pruned = true;
+      } else {
+        valid[connectionId] = quotaEntry;
+      }
+    }
+
+    if (pruned) {
+      window.localStorage.setItem(QUOTA_CACHE_KEY, JSON.stringify(valid));
+    }
+
+    return valid;
   } catch (error) {
     console.error("Error reading quota cache:", error);
     return {};
