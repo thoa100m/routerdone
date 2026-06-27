@@ -1,0 +1,29 @@
+{
+  "title": "Support RouterDone",
+  "message": "Nếu RouterDone giúp bạn tiết kiệm thời gian, bạn có thể ủng hộ dự án bằng một ly cà phê.",
+  "channels": [
+    {
+      "id": "vietqr-mb",
+      "type": "vietqr",
+      "label": "VietQR / MB Bank",
+      "description": "Chuyển khoản ngân hàng qua VietQR",
+      "icon": "qr_code_2",
+      "color": "#16a34a",
+      "bankName": "MB Bank",
+      "bankBin": "970422",
+      "accountNo": "33308102666999",
+      "accountName": "DANG QUANG THOA",
+      "content": "routerdone coffee",
+      "amounts": [30000, 50000, 100000],
+      "defaultAmount": 50000
+    },
+    {
+      "id": "paypal",
+      "label": "PayPal",
+      "description": "Ủng hộ qua PayPal",
+      "icon": "payments",
+      "color": "#0070ba",
+      "url": "https://www.paypal.com/donate/?business=thoadqhn%40gmail.com&currency_code=USD"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ export const APP_CONFIG = {
 // GitHub configuration
 export const GITHUB_CONFIG = {
   changelogUrl: "https://raw.githubusercontent.com/thoa100m/routerdone/refs/heads/master/CHANGELOG.md",
+  donateUrl: "/donate.json",
 };
 
 // Updater configuration

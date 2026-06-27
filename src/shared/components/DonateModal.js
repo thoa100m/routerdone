@@ -5,6 +5,25 @@ import { createPortal } from "react-dom";
 import PropTypes from "prop-types";
 import { GITHUB_CONFIG } from "@/shared/constants/config";
 
+function formatVnd(amount) {
+  return new Intl.NumberFormat("vi-VN", {
+    style: "currency",
+    currency: "VND",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function buildVietQrUrl(channel, amount) {
+  const query = new URLSearchParams({
+    accountName: channel.accountName || "",
+    addInfo: channel.content || "",
+  });
+
+  if (amount) query.set("amount", String(amount));
+
+  return `https://img.vietqr.io/image/${channel.bankBin}-${channel.accountNo}-compact2.png?${query.toString()}`;
+}
+
 export default function DonateModal({ isOpen, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -89,6 +108,18 @@ export default function DonateModal({ isOpen, onClose }) {
 
 function DonateChannelCard({ channel }) {
   const { label, description, icon, color, url, qr } = channel;
+  const [copied, setCopied] = useState("");
+  const [selectedAmount, setSelectedAmount] = useState(channel.defaultAmount || channel.amounts?.[0] || 0);
+  const isVietQr = channel.type === "vietqr";
+  const qrUrl = isVietQr ? buildVietQrUrl(channel, selectedAmount) : qr;
+
+  const copyValue = async (key, value) => {
+    if (!value) return;
+    await navigator.clipboard?.writeText(String(value));
+    setCopied(key);
+    window.setTimeout(() => setCopied(""), 1200);
+  };
+
   const content = (
     <>
       <div
@@ -101,12 +132,61 @@ function DonateChannelCard({ channel }) {
       {description && (
         <div className="text-xs text-text-muted mb-3 text-center">{description}</div>
       )}
-      {qr && (
+      {qrUrl && (
         <img
-          src={qr}
+          src={qrUrl}
           alt={`${label} QR`}
           className="w-full max-w-[180px] aspect-square object-contain rounded-lg bg-white p-1"
         />
+      )}
+      {isVietQr && (
+        <div className="mt-3 w-full space-y-3">
+          {channel.amounts?.length > 0 && (
+            <div className="grid grid-cols-3 gap-1.5">
+              {channel.amounts.map((amount) => (
+                <button
+                  key={amount}
+                  type="button"
+                  onClick={() => setSelectedAmount(amount)}
+                  className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                    selectedAmount === amount
+                      ? "border-transparent text-white"
+                      : "border-black/10 dark:border-white/10 text-text-muted hover:text-text-main"
+                  }`}
+                  style={selectedAmount === amount ? { backgroundColor: color } : undefined}
+                >
+                  {formatVnd(amount).replace("₫", "đ")}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="space-y-1.5 text-xs">
+            <CopyRow
+              label="Bank"
+              value={channel.bankName}
+              copied={copied === "bank"}
+              onCopy={() => copyValue("bank", channel.bankName)}
+            />
+            <CopyRow
+              label="Account"
+              value={channel.accountNo}
+              copied={copied === "account"}
+              onCopy={() => copyValue("account", channel.accountNo)}
+            />
+            <CopyRow
+              label="Name"
+              value={channel.accountName}
+              copied={copied === "name"}
+              onCopy={() => copyValue("name", channel.accountName)}
+            />
+            <CopyRow
+              label="Content"
+              value={channel.content}
+              copied={copied === "content"}
+              onCopy={() => copyValue("content", channel.content)}
+            />
+          </div>
+        </div>
       )}
     </>
   );
@@ -127,6 +207,22 @@ function DonateChannelCard({ channel }) {
         </a>
       )}
     </div>
+  );
+}
+
+function CopyRow({ label, value, copied, onCopy }) {
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      className="flex w-full items-center justify-between gap-2 rounded-lg bg-black/[0.03] px-2.5 py-1.5 text-left hover:bg-black/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+    >
+      <span className="shrink-0 text-text-muted">{label}</span>
+      <span className="min-w-0 flex-1 truncate font-medium text-text-main">{value}</span>
+      <span className="material-symbols-outlined text-[15px] text-text-muted">
+        {copied ? "check" : "content_copy"}
+      </span>
+    </button>
   );
 }
 
