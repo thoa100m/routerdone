@@ -9,6 +9,8 @@ import {
 import { APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import { normalizeProviderId, normalizeProviderSpecificData } from "@/lib/providerNormalization";
+import { normalizeStaleConnectionState } from "open-sse/services/accountFallback.js";
+import { updateProviderConnection } from "@/models";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +51,16 @@ async function normalizeProxyPoolId(proxyPoolId) {
 // GET /api/providers - List all connections
 export async function GET() {
   try {
-    const connections = await getProviderConnections();
+    const rawConnections = await getProviderConnections();
+    const connections = [];
+    for (const connection of rawConnections) {
+      const stale = normalizeStaleConnectionState(connection);
+      if (stale.needsUpdate) {
+        connections.push(await updateProviderConnection(connection.id, stale.update) || connection);
+      } else {
+        connections.push(connection);
+      }
+    }
 
     // Build nodeNameMap for compatible providers (id → name)
     let nodeNameMap = {};

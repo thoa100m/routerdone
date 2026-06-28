@@ -1,4 +1,4 @@
-﻿// OpenAI-compatible error types mapping (client-facing)
+// OpenAI-compatible error types mapping (client-facing)
 export const ERROR_TYPES = {
   400: { type: "invalid_request_error", code: "bad_request" },
   401: { type: "authentication_error", code: "invalid_api_key" },
@@ -54,6 +54,10 @@ export const MODEL_FAILURE_IDLE_RESET_MS = 60 * 60 * 1000;
 // Short account/provider cooldown for busy or concurrency gates.
 export const BUSY_CONNECTION_COOLDOWN_MS = 30 * 1000;
 
+// Short self-heal window for request-scoped/provider-surface errors. These
+// should clear from Provider UI quickly and be retried on the next call.
+export const PROVIDER_SELF_HEAL_COOLDOWN_MS = 3 * 1000;
+
 // Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -74,10 +78,18 @@ const COOLDOWN = {
  */
 export const ERROR_RULES = [
   // --- Transient stream errors: short cooldown, don't mark account dead long ---
-  { text: "empty upstream stream",             cooldownMs: 5 * 1000 },
-  { text: "upstream first productive timeout", cooldownMs: 5 * 1000 },
-  { text: "upstream stalled",                  cooldownMs: 5 * 1000 },
-  { text: "upstream headers timeout",          cooldownMs: 3 * 1000 },
+  { text: "empty upstream stream",             cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "upstream first productive timeout", cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "upstream stalled",                  cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "upstream headers timeout",          cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  // --- Request/provider surface errors: short auto-heal, do not mark account dead ---
+  { text: "context_too_large",        cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "input tokens exceed",      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "input exceeds the context window", cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "context length exceeded",  cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "maximum context length",   cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+  { text: "reduce conversation context", cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS, selfHeal: true },
+
   // --- Text-based rules (checked first, order = priority) ---
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
@@ -110,5 +122,6 @@ export const COOLDOWN_MS = {
   paymentRequired: COOLDOWN.long,
   notFound: COOLDOWN.long,
   transient: TRANSIENT_COOLDOWN_MS,
+  selfHeal: PROVIDER_SELF_HEAL_COOLDOWN_MS,
   requestNotAllowed: COOLDOWN.short,
 };

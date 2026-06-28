@@ -40,7 +40,7 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, selfHeal?: boolean }}
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0) {
   const lowerError = normalizeErrorText(errorText);
@@ -52,7 +52,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
         return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
       }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+      return { shouldFallback: true, cooldownMs: rule.cooldownMs, selfHeal: rule.selfHeal === true };
     }
 
     // Status-based rule: match HTTP status code
@@ -61,7 +61,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
         return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
       }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+      return { shouldFallback: true, cooldownMs: rule.cooldownMs, selfHeal: rule.selfHeal === true };
     }
   }
 
@@ -72,6 +72,16 @@ export function checkFallbackError(status, errorText, backoffLevel = 0) {
 /** True for the rate-limit error class: HTTP 429 or a rate-limit text rule
  *  (the `backoff: true` entries in ERROR_RULES). These get a fixed base cooldown
  *  and are neutral to the per-model failure counter (no bump, no reset). */
+export function isProviderSelfHealError(status, errorText) {
+  const lowerError = normalizeErrorText(errorText);
+  for (const rule of ERROR_RULES) {
+    if (!rule.selfHeal) continue;
+    if (rule.text && lowerError && lowerError.includes(rule.text)) return true;
+    if (rule.status && rule.status === status) return true;
+  }
+  return false;
+}
+
 export function isRateLimitError(status, errorText) {
   const lowerError = normalizeErrorText(errorText);
   for (const rule of ERROR_RULES) {
@@ -261,12 +271,12 @@ export function getModelBackoffCooldownMs(failureCount) {
  *  Non-rate-limit failures escalate (base * 2^(n-1)) and, after
  *  MODEL_FAILURE_IDLE_RESET_MS with no new non-rate-limit failure, the counter
  *  resets to a fresh start. */
-export function buildModelFailureBackoffUpdate(connection, model, { isRateLimit = false } = {}) {
+export function buildModelFailureBackoffUpdate(connection, model, { isRateLimit = false, selfHeal = false } = {}) {
   const prevCount = getModelFailureCount(connection, model);
   const atKey = getModelFailureAtKey(model);
   const now = Date.now();
-  if (isRateLimit) {
-    return { count: prevCount, cooldownMs: MODEL_FAILURE_BACKOFF_BASE_MS, update: {} };
+  if (isRateLimit || selfHeal) {
+    return { count: prevCount, cooldownMs: selfHeal ? 0 : MODEL_FAILURE_BACKOFF_BASE_MS, update: {} };
   }
   const lastAt = Number(connection?.[atKey]) || 0;
   const idleLongEnough = lastAt > 0 && (now - lastAt) > MODEL_FAILURE_IDLE_RESET_MS;

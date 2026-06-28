@@ -10,11 +10,14 @@ import {
   isRateLimitError,
   getModelFailureAtKey,
   MODEL_LOCK_PREFIX,
+  checkFallbackError,
+  isProviderSelfHealError,
 } from "../../open-sse/services/accountFallback.js";
 import {
   MODEL_FAILURE_BACKOFF_BASE_MS,
   MODEL_FAILURE_BACKOFF_MAX_MS,
   MODEL_FAILURE_IDLE_RESET_MS,
+  PROVIDER_SELF_HEAL_COOLDOWN_MS,
 } from "../../open-sse/config/errorConfig.js";
 
 describe("per-model consecutive-failure backoff", () => {
@@ -107,6 +110,51 @@ describe("429 rate-limit neutrality", () => {
     const r = buildModelFailureBackoffUpdate(conn, "gpt-4", { isRateLimit: false });
     expect(r.count).toBe(4);
     expect(r.cooldownMs).toBe(MODEL_FAILURE_BACKOFF_BASE_MS * 8);
+  });
+});
+
+describe("provider self-heal errors", () => {
+  it("classifies empty upstream stream as a short self-heal provider error", () => {
+    const r = checkFallbackError(502, "Empty upstream stream (terminal before productive)");
+    expect(r).toMatchObject({
+      shouldFallback: true,
+      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS,
+      selfHeal: true,
+    });
+    expect(isProviderSelfHealError(502, "Empty upstream stream (terminal before productive)")).toBe(true);
+  });
+
+  it("classifies context too large as a short self-heal provider error", () => {
+    const errorText = "context_too_large: estimated 199070 input tokens exceed the 170000 hard cap";
+    const r = checkFallbackError(400, errorText);
+    expect(r).toMatchObject({
+      shouldFallback: true,
+      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS,
+      selfHeal: true,
+    });
+    expect(isProviderSelfHealError(400, errorText)).toBe(true);
+  });
+
+  it("classifies upstream context-window errors as short self-heal provider errors", () => {
+    const errorText = "Upstream stream error: Your input exceeds the context window of this model. Please adjust your input and try again.";
+    const r = checkFallbackError(400, errorText);
+    expect(r).toMatchObject({
+      shouldFallback: true,
+      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS,
+      selfHeal: true,
+    });
+    expect(isProviderSelfHealError(400, errorText)).toBe(true);
+  });
+
+  it("does not bump model failure counters for self-heal errors", () => {
+    const conn = {
+      "modelFailure_claude-opus-4-8": 4,
+      "modelFailureAt_claude-opus-4-8": Date.now(),
+    };
+    const r = buildModelFailureBackoffUpdate(conn, "claude-opus-4-8", { selfHeal: true });
+    expect(r.count).toBe(4);
+    expect(r.cooldownMs).toBe(0);
+    expect(r.update).toEqual({});
   });
 });
 

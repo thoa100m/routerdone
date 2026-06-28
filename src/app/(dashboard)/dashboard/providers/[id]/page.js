@@ -22,6 +22,7 @@ import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
+const ERROR_AUTO_REFRESH_FALLBACK_MS = 3000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -772,6 +773,32 @@ export default function ProviderDetailPage() {
   useEffect(() => {
     setSelectedConnectionIds((prev) => prev.filter((id) => connections.some((conn) => conn.id === id)));
   }, [connections]);
+
+  useEffect(() => {
+    const errorConnections = connections.filter((conn) => (
+      conn.isActive !== false &&
+      (conn.lastError || conn.testStatus === "unavailable" || conn.testStatus === "error")
+    ));
+    if (errorConnections.length === 0) return;
+
+    const now = Date.now();
+    const nextLockExpiry = errorConnections
+      .flatMap((conn) => Object.entries(conn)
+        .filter(([key, value]) => key.startsWith("modelLock_") && value)
+        .map(([, value]) => new Date(value).getTime())
+        .filter((time) => Number.isFinite(time) && time > now))
+      .sort((a, b) => a - b)[0];
+
+    const delay = Math.max(500, Math.min(
+      nextLockExpiry ? nextLockExpiry - now + 250 : ERROR_AUTO_REFRESH_FALLBACK_MS,
+      ERROR_AUTO_REFRESH_FALLBACK_MS,
+    ));
+    const timer = window.setTimeout(() => {
+      fetchConnections();
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [connections, fetchConnections]);
 
   const selectedProxySummary = (() => {
     if (selectedConnections.length === 0) return "";

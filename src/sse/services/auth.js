@@ -1,6 +1,6 @@
 ﻿import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs, buildModelFailureBackoffUpdate, buildClearModelFailureUpdate, isRateLimitError } from "open-sse/services/accountFallback.js";
+import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs, buildModelFailureBackoffUpdate, buildClearModelFailureUpdate, isRateLimitError, isProviderSelfHealError } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import * as log from "../utils/logger.js";
@@ -233,7 +233,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   const recentFailureCount = (busyOrConcurrency || preflightTimeout) ? (recentSameKind ? (conn?.comboPreflightFailureCount || 0) + 1 : 1) : 0;
 
   // Provider-specific precise cooldown (e.g. codex usage_limit_reached resets_at) overrides backoff
-  let shouldFallback, cooldownMs, newBackoffLevel;
+  let shouldFallback, cooldownMs, newBackoffLevel, selfHeal;
   if (busyOrConcurrency) {
     shouldFallback = true;
     cooldownMs = resolveConnectionCooldownMs({ status, errorText: reasonText });
@@ -243,7 +243,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     cooldownMs = Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, reasonText, backoffLevel));
+    ({ shouldFallback, cooldownMs, newBackoffLevel, selfHeal } = checkFallbackError(status, reasonText, backoffLevel));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
@@ -257,7 +257,8 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   let failureCounterUpdate = {};
   if (!lockConnection && model && !preflightTimeout) {
     const isRateLimit = isRateLimitError(status, reasonText);
-    const backoff = buildModelFailureBackoffUpdate(conn, model, { isRateLimit });
+    const isSelfHeal = selfHeal || isProviderSelfHealError(status, reasonText);
+    const backoff = buildModelFailureBackoffUpdate(conn, model, { isRateLimit, selfHeal: isSelfHeal });
     cooldownMs = Math.max(cooldownMs || 0, backoff.cooldownMs);
     failureCounterUpdate = backoff.update;
   }
