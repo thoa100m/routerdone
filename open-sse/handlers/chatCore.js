@@ -374,7 +374,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     ? { ...resolvedStreamPolicy, firstProductiveTimeoutMs: Math.min(resolvedStreamPolicy.firstProductiveTimeoutMs ?? 45000, 45000) }
     : resolvedStreamPolicy;
 
-  return handleStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat, userAgent, reqLogger, toolNameMap, streamController, onStreamComplete, log, streamTimeoutPolicy: streamTimeoutOverride });
+  const retryEmptyStream = async () => {
+    const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+    reqLogger.logTargetRequest(retryResult.url, retryResult.headers, retryResult.transformedBody);
+    if (retryResult.transformedBody) finalBody = retryResult.transformedBody;
+    return retryResult;
+  };
+
+  return handleStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat, userAgent, reqLogger, toolNameMap, streamController, onStreamComplete, log, streamTimeoutPolicy: streamTimeoutOverride, retryFn: retryEmptyStream });
 }
 
 export function isTokenExpiringSoon(expiresAt, bufferMs = 5 * 60 * 1000) {

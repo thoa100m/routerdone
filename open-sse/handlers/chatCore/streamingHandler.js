@@ -141,6 +141,16 @@ function isHeartbeatChunk(line, parsed) {
   if (parsed?.type === "ping") return true;
   return false;
 }
+
+export function isRetryableEmptyStreamError(error) {
+  const text = String(error || "").toLowerCase();
+  return text.includes("empty upstream stream") || text.includes("terminal before productive");
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, ms || 0)));
+}
+
 export async function guardInitialStream(providerResponse, { targetFormat, log, provider, model, policy, routeInfo }) {
   if (!providerResponse.body) return { response: providerResponse };
   const reader = providerResponse.body.getReader();
@@ -297,8 +307,21 @@ function buildTransformStream({ provider, sourceFormat, targetFormat, userAgent,
   return createPassthroughStreamWithLogger(provider, reqLogger, model, connectionId, body, onStreamComplete, apiKey);
 }
 
-export async function handleStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, userAgent, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, streamController, onStreamComplete, log, streamTimeoutPolicy, routeInfo }) {
-  const guarded = await guardInitialStream(providerResponse, { targetFormat, log, provider, model, policy: streamTimeoutPolicy, routeInfo });
+export async function handleStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, userAgent, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, streamController, onStreamComplete, log, streamTimeoutPolicy, routeInfo, retryFn, emptyStreamRetryDelayMs = PREFLIGHT_TICK_MS }) {
+  let guarded = await guardInitialStream(providerResponse, { targetFormat, log, provider, model, policy: streamTimeoutPolicy, routeInfo });
+  if (guarded.error && retryFn && isRetryableEmptyStreamError(guarded.error)) {
+    log?.warn?.("STREAM", `${provider?.toUpperCase?.() || provider} | ${model} | empty upstream stream, retrying after ${emptyStreamRetryDelayMs}ms`);
+    await wait(emptyStreamRetryDelayMs);
+    try {
+      const retryResult = await retryFn();
+      if (retryResult?.response) {
+        providerResponse = retryResult.response;
+        guarded = await guardInitialStream(providerResponse, { targetFormat, log, provider, model, policy: streamTimeoutPolicy, routeInfo });
+      }
+    } catch (retryError) {
+      log?.warn?.("STREAM", `${provider?.toUpperCase?.() || provider} | ${model} | empty upstream stream retry failed: ${retryError.message || retryError}`);
+    }
+  }
   if (guarded.error) {
     streamController.handleError(new Error(guarded.error));
     return createErrorResult(guarded.status, guarded.error);

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import { handleComboChat, getRotatedModels, resetComboRotation, resetComboCooldowns, getComboCooldownState } from "../../open-sse/services/combo.js";
 import { parseResetAfterText, parseRetryAfterHeader } from "../../open-sse/utils/error.js";
-import { guardInitialStream, isProductiveStreamChunk } from "../../open-sse/handlers/chatCore/streamingHandler.js";
+import { guardInitialStream, handleStreamingResponse, isProductiveStreamChunk, isRetryableEmptyStreamError } from "../../open-sse/handlers/chatCore/streamingHandler.js";
 import { resolveRoutePolicy } from "../../open-sse/services/routePolicy.js";
 import { isBusyConcurrencyError, shouldLockConnectionForError, resolveConnectionCooldownMs } from "../../open-sse/services/accountFallback.js";
 
@@ -322,8 +322,59 @@ describe("productive stream watchdog", () => {
       policy: { firstByteTimeoutMs: 5, firstProductiveTimeoutMs: 20, totalBudgetMs: 50 },
     });
     expect(res.error).toMatch(/Empty upstream stream/);
+    expect(isRetryableEmptyStreamError(res.error)).toBe(true);
   });
 
+  it("only retries empty upstream preflight failures", () => {
+    expect(isRetryableEmptyStreamError("Empty upstream stream (terminal before productive)")).toBe(true);
+    expect(isRetryableEmptyStreamError("Empty upstream stream before content")).toBe(true);
+    expect(isRetryableEmptyStreamError("Upstream stream error: rate limited")).toBe(false);
+  });
+
+  it("retries an empty upstream stream once before returning to the client", async () => {
+    let retries = 0;
+    const streamController = {
+      signal: new AbortController().signal,
+      startTime: Date.now(),
+      isConnected: () => true,
+      handleComplete: () => {},
+      handleError: error => { throw error; },
+      handleDisconnect: () => {},
+      abort: () => {},
+    };
+
+    const result = await handleStreamingResponse({
+      providerResponse: sseResponse(["data: [DONE]\n\n"]),
+      provider: "p",
+      model: "m",
+      sourceFormat: null,
+      targetFormat: null,
+      userAgent: "test",
+      body: {},
+      stream: true,
+      translatedBody: {},
+      finalBody: {},
+      requestStartTime: Date.now(),
+      connectionId: "test-conn",
+      apiKey: "test-key",
+      clientRawRequest: {},
+      reqLogger: { logTargetResponse: () => {} },
+      toolNameMap: {},
+      streamController,
+      onStreamComplete: () => {},
+      log,
+      streamTimeoutPolicy: { idleAfterProductiveMs: 1000 },
+      retryFn: async () => {
+        retries += 1;
+        return { response: sseResponse(["data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n", "data: [DONE]\n\n"]) };
+      },
+      emptyStreamRetryDelayMs: 0,
+    });
+
+    expect(result.success).toBe(true);
+    expect(retries).toBe(1);
+    await result.response.text();
+  });
   it("does not treat metadata-only chunks as productive", async () => {
     const res = await guardInitialStream(sseResponse(["data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"], true), {
       targetFormat: null, log, provider: "p", model: "m",
