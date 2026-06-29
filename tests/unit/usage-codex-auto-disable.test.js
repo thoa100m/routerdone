@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   getExecutor: vi.fn(),
 }));
 
+vi.mock("open-sse/index.js", () => ({}));
+
 vi.mock("@/lib/localDb", () => ({
   getProviderConnectionById: mocks.getProviderConnectionById,
   updateProviderConnection: mocks.updateProviderConnection,
@@ -25,6 +27,10 @@ vi.mock("@/lib/localDb", () => ({
 
 vi.mock("@/lib/network/connectionProxy", () => ({
   resolveConnectionProxyConfig: mocks.resolveConnectionProxyConfig,
+}));
+
+vi.mock("@/shared/constants/providers", () => ({
+  USAGE_APIKEY_PROVIDERS: [],
 }));
 
 vi.mock("open-sse/services/usage.js", () => ({
@@ -77,5 +83,35 @@ describe("Codex usage auth failures", () => {
     await fetchConnectionUsage(connection.id);
 
     expect(mocks.updateProviderConnection).not.toHaveBeenCalled();
+  });
+  it("turns off a Codex account when credential refresh is unrecoverable", async () => {
+    mocks.getProviderConnectionById.mockResolvedValue({
+      ...connection,
+      refreshToken: "stale-refresh-token",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    });
+    mocks.getExecutor.mockReturnValue({
+      needsRefresh: () => true,
+      refreshCredentials: vi.fn().mockResolvedValue({
+        error: "unrecoverable_refresh_error",
+        code: "refresh_token_invalidated",
+      }),
+    });
+
+    const { fetchConnectionUsage } = await import("../../src/app/api/usage/_shared.js");
+    const result = await fetchConnectionUsage(connection.id);
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(401);
+    expect(result.error).toContain("Codex refresh token invalid. Re-auth required.");
+    expect(mocks.updateProviderConnection).toHaveBeenCalledWith(
+      connection.id,
+      expect.objectContaining({
+        isActive: false,
+        testStatus: "auth_error",
+        lastError: "Codex refresh token invalid. Re-auth required.",
+        errorCode: "refresh_token_invalidated",
+      }),
+    );
   });
 });

@@ -12,11 +12,39 @@ import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
 
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
 const CODEX_USAGE_AUTH_UNAVAILABLE = "codex connected. usage api temporarily unavailable (401).";
+const UNRECOVERABLE_REFRESH_ERRORS = new Set([
+  "unrecoverable_refresh_error",
+  "refresh_token_reused",
+  "refresh_token_invalidated",
+  "invalid_request",
+  "invalid_grant",
+]);
 
 function isAuthExpiredMessage(usage) {
   if (!usage?.message) return false;
   const msg = usage.message.toLowerCase();
   return AUTH_EXPIRED_PATTERNS.some((p) => msg.includes(p));
+}
+
+function isUnrecoverableRefreshResult(result) {
+  return result && typeof result === "object" && UNRECOVERABLE_REFRESH_ERRORS.has(result.error || result.code);
+}
+
+function getReconnectRequiredMessage(connection, refreshResult) {
+  const provider = connection?.provider || "Provider";
+  if (provider === "codex") return "Codex refresh token invalid. Re-auth required.";
+  return `${provider} refresh token invalid. Re-auth required.`;
+}
+
+async function disableConnectionForRefreshFailure(connection, refreshResult) {
+  if (!connection?.id || connection?.isActive === false) return;
+  await updateProviderConnection(connection.id, {
+    isActive: false,
+    testStatus: "auth_error",
+    lastError: getReconnectRequiredMessage(connection, refreshResult),
+    lastErrorAt: new Date().toISOString(),
+    errorCode: refreshResult?.code || refreshResult?.error || "unrecoverable_refresh_error",
+  });
 }
 
 function shouldDisableForUsageAuthFailure(connection, usage) {
@@ -59,6 +87,11 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
   }
 
   const refreshResult = await executor.refreshCredentials(credentials, console, proxyOptions);
+
+  if (isUnrecoverableRefreshResult(refreshResult)) {
+    await disableConnectionForRefreshFailure(connection, refreshResult);
+    throw new Error(getReconnectRequiredMessage(connection, refreshResult));
+  }
 
   if (!refreshResult) {
     if (connection.accessToken) {
@@ -143,8 +176,13 @@ export async function fetchConnectionUsage(connectionId) {
         const result = await refreshAndUpdateCredentials(connection, false, proxyOptions);
         connection = result.connection;
       } catch (refreshError) {
-        console.error("[Usage API] Credential refresh failed:", refreshError);
-        return { ok: false, status: 401, error: `Credential refresh failed: ${refreshError.message}` };
+        const message = refreshError?.message || "Unknown credential refresh failure";
+        if (message.includes("Re-auth required")) {
+          console.warn(`[Usage API] Credential refresh requires re-auth: ${message}`);
+        } else {
+          console.error("[Usage API] Credential refresh failed:", refreshError);
+        }
+        return { ok: false, status: 401, error: `Credential refresh failed: ${message}` };
       }
     }
 

@@ -11,6 +11,12 @@ const CODEX_CONFIG = {
   resetCreditsConsumeUrl: U("codex").resetCreditsConsumeUrl,
 };
 
+function getFetchFailureMessage(error) {
+  const causeCode = error?.cause?.code || error?.code || "";
+  if (causeCode) return `Codex usage API fetch failed (${causeCode}). Check network/proxy or reconnect Codex.`;
+  return "Codex usage API fetch failed. Check network/proxy or reconnect Codex.";
+}
+
 function getCodexRateLimitBody(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   return snapshot.rate_limit && typeof snapshot.rate_limit === "object"
@@ -97,7 +103,7 @@ export async function getCodexUsage(accessToken, proxyOptions = null) {
       quotas,
     };
   } catch (error) {
-    throw new Error(`Failed to fetch Codex usage: ${error.message}`);
+    return { message: getFetchFailureMessage(error) };
   }
 }
 
