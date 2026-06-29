@@ -8,6 +8,7 @@ import { isImmediateFallbackStatus, isRetryableTransientStatus, resolveRoutePoli
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { MODEL_FAILURE_BACKOFF_MAX_MS } from "../config/errorConfig.js";
+import { COMBO_REASONING_STREAM_FIRST_PRODUCTIVE_TIMEOUT_MS } from "../config/runtimeConfig.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -30,6 +31,23 @@ const consoleTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   second: "2-digit",
   hour12: false,
 });
+
+function isSlowReasoningAttempt(body, modelStr) {
+  const effort = String(body?.reasoning_effort || body?.reasoning?.effort || "").toLowerCase();
+  const model = String(modelStr || "").toLowerCase();
+  return ["high", "xhigh"].includes(effort) || /(?:thinking|reasoning|xhigh)/i.test(model);
+}
+
+function withModelStreamPolicy(baseStreamPolicy, body, modelStr) {
+  if (!isSlowReasoningAttempt(body, modelStr)) return baseStreamPolicy;
+  return {
+    ...baseStreamPolicy,
+    firstProductiveTimeoutMs: Math.max(
+      baseStreamPolicy?.firstProductiveTimeoutMs || 0,
+      COMBO_REASONING_STREAM_FIRST_PRODUCTIVE_TIMEOUT_MS,
+    ),
+  };
+}
 
 function formatConsoleTimeGmt7(value) {
   if (!value) return value;
@@ -402,6 +420,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       break;
     }
     const modelStr = rotatedModels[i];
+    const modelStreamPolicy = withModelStreamPolicy(policy.stream, body, modelStr);
     summary.tried++;
     log.info("COMBO", `${comboLogPrefix} | Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 
@@ -418,8 +437,8 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
           attemptIndex: i + 1,
           attemptTotal: rotatedModels.length,
           routeMode: "combo",
-          streamTimeoutPolicy: policy.stream,
-          streamPreflightTimeoutMs: policy.stream.firstProductiveTimeoutMs,
+          streamTimeoutPolicy: modelStreamPolicy,
+          streamPreflightTimeoutMs: modelStreamPolicy.firstProductiveTimeoutMs,
         });
 
         if (result.ok || isImmediateFallbackStatus(result.status) || !isTransientComboStatus(result.status) || attempt >= retryAttempts) {
@@ -428,7 +447,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
         attempt++;
         const remainingMs = totalDeadline - Date.now();
-        if (remainingMs <= retryDelayMs + policy.stream.firstProductiveTimeoutMs) break;
+        if (remainingMs <= retryDelayMs + modelStreamPolicy.firstProductiveTimeoutMs) break;
         log.info("COMBO", `${comboLogPrefix} | Model ${modelStr} transient ${result.status}, retry ${attempt}/${retryAttempts} after ${retryDelayMs / 1000}s`);
         if (retryDelayMs > 0) await new Promise(r => setTimeout(r, Math.min(retryDelayMs, Math.max(0, totalDeadline - Date.now()))));
       }

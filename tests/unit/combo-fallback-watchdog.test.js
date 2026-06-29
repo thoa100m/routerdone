@@ -237,7 +237,7 @@ describe("adaptive combo fallback", () => {
       comboName: "combo",
       comboRetryAttempts: 0,
       comboRetryDelayMs: 0,
-      log,
+      log: { info: () => {}, warn: () => {}, debug: () => {} },
       handleSingleModel: async (_body, model) => {
         firstTried.push(model);
         if (model === "p/a") return authLocked();
@@ -408,6 +408,23 @@ describe("productive stream watchdog", () => {
   }, 10000);
   it("direct default timeout is longer than combo default timeout", () => {
     expect(resolveRoutePolicy("direct").stream.firstProductiveTimeoutMs).toBeGreaterThan(resolveRoutePolicy("combo").stream.firstProductiveTimeoutMs);
+  });
+
+  it("extends combo preflight for high-effort reasoning models", async () => {
+    const seen = [];
+    await handleComboChat({
+      body: { model: "combo", messages: [], reasoning_effort: "xhigh" },
+      models: ["sk/claude-opus-4.8-thinking"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      log: { info: () => {}, warn: () => {}, debug: () => {} },
+      handleSingleModel: async (_body, _model, ctx) => {
+        seen.push(ctx.streamTimeoutPolicy.firstProductiveTimeoutMs);
+        return new Response(JSON.stringify({ error: { message: "bad gateway" } }), { status: 502 });
+      },
+    });
+    expect(seen[0]).toBeGreaterThan(resolveRoutePolicy("combo").stream.firstProductiveTimeoutMs);
+    expect(seen[0]).toBe(45_000);
   });
 });
 
