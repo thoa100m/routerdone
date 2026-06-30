@@ -820,15 +820,17 @@ export async function getChartData(period = "7d", preferredTimeZone) {
 
   return buckets.map(({ dateKey, ...bucket }) => bucket);
 }
-function formatLogDate(date = new Date()) {
+function formatLogDate(timestamp, timeZone = getUsageTimeZone()) {
+  const parts = getZonedParts(timestamp, timeZone);
   const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${pad(parts.day)}-${pad(parts.month)}-${parts.year} ${pad(parts.hour)}:${pad(parts.minute)}:${pad(parts.second)}`;
 }
 
 // No-op: request log is now derived from usageHistory table on read.
 export async function appendRequestLog() {}
 
-export async function getRecentLogs(limit = 200) {
+export async function getRecentLogs(limit = 200, preferredTimeZone) {
+  const timeZone = getUsageTimeZone(preferredTimeZone);
   try {
     const db = await getAdapter();
     const rows = db.all(
@@ -845,7 +847,7 @@ export async function getRecentLogs(limit = 200) {
     } catch {}
 
     return rows.map((r) => {
-      const ts = formatLogDate(new Date(r.timestamp));
+      const ts = formatLogDate(new Date(r.timestamp).getTime(), timeZone);
       const p = r.provider?.toUpperCase() || "-";
       const m = r.model || "-";
       const account = connMap[r.connectionId] || (r.connectionId ? r.connectionId.slice(0, 8) : "-");

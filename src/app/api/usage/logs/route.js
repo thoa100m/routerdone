@@ -8,8 +8,7 @@ export async function GET(request) {
     const logs = await getRecentLogs(200, timeZone);
     return NextResponse.json(logs);
   } catch (error) {
-    console.error("[API ERROR] /api/usage/logs failed:", error);
-    console.error("[API ERROR] Stack:", error?.stack);
+    console.error("Error fetching logs:", error);
     return NextResponse.json({ error: "Failed to fetch logs" }, { status: 500 });
   }
 }
