@@ -92,6 +92,20 @@ export function isRateLimitError(status, errorText) {
   return false;
 }
 
+export function shouldDisableConnectionForError(status, errorText) {
+  if (Number(status) === 402) return true;
+  if (Number(status) !== 403) return false;
+
+  const lowerError = normalizeErrorText(errorText);
+  if (!lowerError) return false;
+  return (
+    lowerError.includes("hết credit") ||
+    lowerError.includes("het credit") ||
+    (lowerError.includes("credit") && lowerError.includes("pay-as-you")) ||
+    (lowerError.includes("insufficient") && lowerError.includes("credit"))
+  );
+}
+
 export function isBusyConcurrencyError(errorText) {
   const lowerError = normalizeErrorText(errorText);
   return !!lowerError && BUSY_CONCURRENCY_TEXT.some(text => lowerError.includes(text));

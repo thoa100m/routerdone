@@ -12,6 +12,7 @@ import {
   MODEL_LOCK_PREFIX,
   checkFallbackError,
   isProviderSelfHealError,
+  shouldDisableConnectionForError,
 } from "../../open-sse/services/accountFallback.js";
 import {
   MODEL_FAILURE_BACKOFF_BASE_MS,
@@ -156,6 +157,18 @@ describe("provider self-heal errors", () => {
     });
     expect(isProviderSelfHealError(400, errorText)).toBe(true);
   });
+
+  it("classifies Cloudflare 530 HTML provider pages as short self-heal errors", () => {
+    const errorText = "[530]: <!doctype html> <!--[if lt IE 7]> <html class=\"no-js ie6 oldie\" lang=\"en-US\">";
+    const r = checkFallbackError(530, errorText);
+    expect(r).toMatchObject({
+      shouldFallback: true,
+      cooldownMs: PROVIDER_SELF_HEAL_COOLDOWN_MS,
+      selfHeal: true,
+    });
+    expect(isProviderSelfHealError(530, errorText)).toBe(true);
+  });
+
   it("does not bump model failure counters for self-heal errors", () => {
     const conn = {
       "modelFailure_claude-opus-4-8": 4,
@@ -204,5 +217,20 @@ describe("isRateLimitError classification", () => {
     expect(isRateLimitError(500, "internal error")).toBe(false);
     expect(isRateLimitError(502, "bad gateway")).toBe(false);
     expect(isRateLimitError(401, "invalid key")).toBe(false);
+  });
+});
+
+describe("auto-disable billing errors", () => {
+  it("disables 402 payment errors", () => {
+    expect(shouldDisableConnectionForError(402, "Payment required")).toBe(true);
+  });
+
+  it("disables 403 credit exhaustion from Pay-as-you-go wallets", () => {
+    const errorText = '{"error":{"message":"hết credit (ví Pay-as-you-go)"}}';
+    expect(shouldDisableConnectionForError(403, errorText)).toBe(true);
+  });
+
+  it("does not disable unrelated 403 errors", () => {
+    expect(shouldDisableConnectionForError(403, "request not allowed")).toBe(false);
   });
 });

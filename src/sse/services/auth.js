@@ -1,6 +1,6 @@
 ﻿import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
-import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs, buildModelFailureBackoffUpdate, buildClearModelFailureUpdate, isRateLimitError, isProviderSelfHealError } from "open-sse/services/accountFallback.js";
+import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil, isBusyConcurrencyError, isPreflightTimeoutError, shouldLockConnectionForError, resolveConnectionCooldownMs, buildModelFailureBackoffUpdate, buildClearModelFailureUpdate, isRateLimitError, isProviderSelfHealError, shouldDisableConnectionForError } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import * as log from "../utils/logger.js";
@@ -277,10 +277,9 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
         comboPreflightFailureAt: null,
       };
 
-  // 402 Payment Required: auto-disable the connection so it stops being
-  // selected for routing. A billing problem is not transient like a rate
-  // limit; the owner must fix payment and manually re-enable the account.
-  const paymentBlocked = status === 402;
+  // Billing/credit exhaustion: auto-disable the connection so it stops being
+  // selected for routing until the owner fixes payment and manually re-enables it.
+  const paymentBlocked = shouldDisableConnectionForError(status, reasonText);
   await updateProviderConnection(connectionId, {
     ...lockUpdate,
     ...failureUpdate,
