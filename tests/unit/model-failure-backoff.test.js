@@ -14,6 +14,8 @@ import {
   isClientPayloadError,
   isProviderSelfHealError,
   shouldDisableConnectionForError,
+  isModelLockActive,
+  getEarliestModelLockUntil,
 } from "../../open-sse/services/accountFallback.js";
 import {
   MODEL_FAILURE_BACKOFF_BASE_MS,
@@ -82,6 +84,23 @@ describe("per-model consecutive-failure backoff", () => {
   it("returns empty update when nothing to clear", () => {
     expect(buildClearModelFailureUpdate({}, "gpt-4")).toEqual({});
     expect(buildClearModelFailureUpdate(null, "gpt-4")).toEqual({});
+  });
+});
+
+describe("model DB lock scope", () => {
+  it("can ignore per-model locks while preserving account-level locks", () => {
+    const future = new Date(Date.now() + 60_000).toISOString();
+    expect(isModelLockActive({ "modelLock_gpt-4": future }, "gpt-4")).toBe(true);
+    expect(isModelLockActive({ "modelLock_gpt-4": future }, "gpt-4", { ignoreModelLocks: true })).toBe(false);
+    expect(isModelLockActive({ "modelLock___all": future }, "gpt-4", { ignoreModelLocks: true })).toBe(true);
+  });
+
+  it("ignores per-model lock expiries when computing combo retry timing", () => {
+    const modelExpiry = new Date(Date.now() + 30_000).toISOString();
+    const allExpiry = new Date(Date.now() + 60_000).toISOString();
+    const conn = { "modelLock_gpt-4": modelExpiry, "modelLock___all": allExpiry };
+    expect(getEarliestModelLockUntil(conn)).toBe(modelExpiry);
+    expect(getEarliestModelLockUntil(conn, { ignoreModelLocks: true })).toBe(allExpiry);
   });
 });
 

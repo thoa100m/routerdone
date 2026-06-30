@@ -248,9 +248,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   const excludeConnectionIds = new Set();
   let lastError = null;
   let lastStatus = null;
+  const routeMode = attemptContext.routeMode || (attemptContext.comboName ? "combo" : "direct");
+  const ignoreModelLocks = routeMode === "combo" || routeMode === "fusion";
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { ignoreModelLocks });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
@@ -296,7 +298,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       attemptModel: attemptContext.attemptModel || modelStr,
       attemptIndex: attemptContext.attemptIndex || 1,
       attemptTotal: attemptContext.attemptTotal || 1,
-      routeMode: attemptContext.routeMode || (attemptContext.comboName ? "combo" : "direct"),
+      routeMode,
       fusionRole: attemptContext.fusionRole || null,
       actualProvider: provider,
       actualModel: model,
@@ -325,7 +327,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       contextGuardHardCapTokens: chatSettings.contextGuardHardCapTokens,
       providerThinking,
       routeInfo,
-      streamTimeoutPolicy: resolveRoutePolicy(attemptContext.routeMode || (attemptContext.comboName ? "combo" : "direct"), { stream: attemptContext.streamTimeoutPolicy, streamPreflightTimeoutMs: attemptContext.streamPreflightTimeoutMs }).stream,
+      streamTimeoutPolicy: resolveRoutePolicy(routeMode, { stream: attemptContext.streamTimeoutPolicy, streamPreflightTimeoutMs: attemptContext.streamPreflightTimeoutMs }).stream,
       // Detect source format by endpoint + body
       sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
       onCredentialsRefreshed: async (newCreds) => {

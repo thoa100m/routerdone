@@ -209,10 +209,15 @@ export function getModelLockKey(model) {
 /**
  * Check if a model lock on a connection is still active.
  * Reads flat field `modelLock_${model}` (or `modelLock___all` when model=null).
+ * Combo routing may ignore per-model DB locks because combo has its own
+ * soft cooldown/order; account-level locks still apply.
  */
-export function isModelLockActive(connection, model) {
+export function isModelLockActive(connection, model, options = {}) {
+  const allExpiry = connection?.[MODEL_LOCK_ALL];
+  if (allExpiry && new Date(allExpiry).getTime() > Date.now()) return true;
+  if (options?.ignoreModelLocks) return false;
   const key = getModelLockKey(model);
-  const expiry = connection[key] || connection[MODEL_LOCK_ALL];
+  const expiry = connection?.[key];
   if (!expiry) return false;
   return new Date(expiry).getTime() > Date.now();
 }
@@ -221,12 +226,13 @@ export function isModelLockActive(connection, model) {
  * Get earliest active model lock expiry across all modelLock_* fields.
  * Used for UI cooldown display.
  */
-export function getEarliestModelLockUntil(connection) {
+export function getEarliestModelLockUntil(connection, options = {}) {
   if (!connection) return null;
   let earliest = null;
   const now = Date.now();
   for (const [key, val] of Object.entries(connection)) {
     if (!key.startsWith(MODEL_LOCK_PREFIX) || !val) continue;
+    if (options?.ignoreModelLocks && key !== MODEL_LOCK_ALL) continue;
     const t = new Date(val).getTime();
     if (t <= now) continue;
     if (!earliest || t < earliest) earliest = t;

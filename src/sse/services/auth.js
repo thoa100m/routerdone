@@ -40,6 +40,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
+  const lockOptions = { ignoreModelLocks: options?.ignoreModelLocks === true };
   // Acquire mutex to prevent race conditions
   const currentMutex = selectionMutex;
   let resolveMutex;
@@ -82,24 +83,24 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     // Filter out model-locked and excluded connections
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
-      if (isModelLockActive(c, model)) return false;
+      if (isModelLockActive(c, model, lockOptions)) return false;
       return true;
     });
 
     log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}`);
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
-      const locked = isModelLockActive(c, model);
+      const locked = isModelLockActive(c, model, lockOptions);
       if (excluded || locked) {
-        const lockUntil = getEarliestModelLockUntil(c);
+        const lockUntil = getEarliestModelLockUntil(c, lockOptions);
         log.debug("AUTH", `  → ${c.id?.slice(0, 8)} | ${excluded ? "excluded" : ""} ${locked ? `modelLocked(${model}) until ${formatConsoleTimeGmt7(lockUntil)}` : ""}`);
       }
     });
 
     if (availableConnections.length === 0) {
       // Find earliest lock expiry across all connections for retry timing
-      const lockedConns = connections.filter(c => isModelLockActive(c, model));
-      const expiries = lockedConns.map(c => getEarliestModelLockUntil(c)).filter(Boolean);
+      const lockedConns = connections.filter(c => isModelLockActive(c, model, lockOptions));
+      const expiries = lockedConns.map(c => getEarliestModelLockUntil(c, lockOptions)).filter(Boolean);
       const earliest = expiries.sort()[0] || null;
       if (earliest) {
         const earliestConn = lockedConns[0];

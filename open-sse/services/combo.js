@@ -489,20 +489,6 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
 
-      if (isPreflightTimeoutText(errorText)) {
-        const cooldownUntil = markComboCooldown(modelStr);
-        if (cooldownUntil) {
-          log.warn("COMBO", `${comboLogPrefix} | cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)} reason=preflight_timeout`, { status: result.status });
-        }
-      }
-
-      if (isAuthLockedComboError(errorBody)) {
-        const cooldownUntil = markComboCooldown(modelStr);
-        if (cooldownUntil) {
-          log.warn("COMBO", `${comboLogPrefix} | cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)} reason=auth_model_locked`, { status: result.status });
-        }
-      }
-
       // Check if should fallback to next model
       const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
 
@@ -511,6 +497,16 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         logSummary(`stopped=${modelStr} | last_status=${result.status}`);
         log.warn("COMBO", `${comboLogPrefix} | Model ${modelStr} failed (no fallback)`, { status: result.status });
         return result;
+      }
+
+      const cooldownReason = isAuthLockedComboError(errorBody)
+        ? "auth_model_locked"
+        : isPreflightTimeoutText(errorText)
+          ? "preflight_timeout"
+          : "fallback_error";
+      const cooldownUntil = markComboCooldown(modelStr);
+      if (cooldownUntil) {
+        log.warn("COMBO", `${comboLogPrefix} | cooldown model=${modelStr} until=${formatConsoleTimeGmt7(cooldownUntil)} reason=${cooldownReason}`, { status: result.status, cooldownMs });
       }
 
       // Fallback to next model

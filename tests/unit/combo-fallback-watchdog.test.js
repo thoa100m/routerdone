@@ -149,6 +149,42 @@ describe("adaptive combo fallback", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("arms soft cooldown from fallback errors without relying on auth DB locks", async () => {
+    const firstTried = [];
+    const first = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a", "p/b"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        firstTried.push(model);
+        if (model === "p/a") return new Response(JSON.stringify({ error: { message: "bad gateway" } }), { status: 502 });
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(first.ok).toBe(true);
+    expect(firstTried).toEqual(["p/a", "p/b"]);
+    expect(getComboCooldownState("p/a").failureCount).toBe(1);
+
+    const secondTried = [];
+    const second = await handleComboChat({
+      body: { model: "combo", messages: [] },
+      models: ["p/a", "p/b"],
+      comboName: "combo",
+      comboRetryAttempts: 0,
+      comboRetryDelayMs: 0,
+      log,
+      handleSingleModel: async (_body, model) => {
+        secondTried.push(model);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    expect(second.ok).toBe(true);
+    expect(secondTried).toEqual(["p/b"]);
+  });
+
   it("escalates the cooldown exponentially on consecutive failures, capped", async () => {
     const preflightFail = async () => new Response(
       JSON.stringify({ error: { message: "upstream first productive timeout" } }),
