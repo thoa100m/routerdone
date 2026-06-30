@@ -9,7 +9,7 @@ const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 const DEFAULT_USAGE_TIME_ZONE = "Asia/Saigon";
 
-function getUsageTimeZone(preferredTimeZone) {
+export function getUsageTimeZone(preferredTimeZone) {
   const timeZone = preferredTimeZone || process.env.TZ || process.env.NEXT_PUBLIC_TZ || DEFAULT_USAGE_TIME_ZONE;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
@@ -61,6 +61,24 @@ function getUsageDateKey(timestamp = Date.now(), timeZone = getUsageTimeZone()) 
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
+export function getUsagePeriodRange(period = "all", preferredTimeZone) {
+  const now = Date.now();
+  const timeZone = getUsageTimeZone(preferredTimeZone);
+  if (period === "all") return { startMs: 0, endMs: now, timeZone };
+  if (period === "24h") return { startMs: now - PERIOD_MS["24h"], endMs: now, timeZone };
+
+  const daysByPeriod = { today: 1, "7d": 7, "30d": 30, "60d": 60 };
+  const days = daysByPeriod[period];
+  if (!days) return { startMs: 0, endMs: now, timeZone };
+
+  const today = getZonedParts(now, timeZone);
+  const todayStartMs = zonedTimeToUtcMs(today.year, today.month, today.day, 0, 0, 0, timeZone);
+  return {
+    startMs: todayStartMs - (days - 1) * 86400000,
+    endMs: period === "today" ? todayStartMs + 86400000 : now,
+    timeZone,
+  };
+}
 function formatUsageHour(timestamp, timeZone = getUsageTimeZone()) {
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -437,7 +455,7 @@ function loadDaysInRange(adapter, maxDays) {
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
-export async function getUsageStats(period = "all") {
+export async function getUsageStats(period = "all", preferredTimeZone) {
   const db = await getAdapter();
 
   const [{ getProviderConnections }, { getApiKeys }, { getProviderNodes }] = await Promise.all([
@@ -535,7 +553,7 @@ export async function getUsageStats(period = "all") {
     }
   }
 
-  const useDailySummary = period !== "24h" && period !== "today";
+  const useDailySummary = period === "all";
 
   if (useDailySummary) {
     const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
@@ -649,24 +667,17 @@ export async function getUsageStats(period = "all") {
       if (stats.byEndpoint[endpointKey] && new Date(ts) > new Date(stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
     }
   } else {
-    // 24h / today: live history
-    let cutoff;
-    if (period === "today") {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      cutoff = startOfDay.toISOString();
-    } else {
-      cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
-    }
+    // User-scoped periods: live history with IANA timezone boundaries.
+    const { startMs, endMs } = getUsagePeriodRange(period, preferredTimeZone);
     const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
-      [cutoff]
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
+      [new Date(startMs).toISOString(), new Date(endMs).toISOString()]
     );
 
     for (const r of filtered) {
       const tokens = parseJson(r.tokens, {}) || {};
-      const promptTokens = tokens.prompt_tokens || 0;
-      const completionTokens = tokens.completion_tokens || 0;
+      const promptTokens = r.promptTokens ?? tokens.prompt_tokens ?? 0;
+      const completionTokens = r.completionTokens ?? tokens.completion_tokens ?? 0;
       const entryCost = r.cost || 0;
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
 
@@ -788,22 +799,26 @@ export async function getChartData(period = "7d", preferredTimeZone) {
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
   const todayParts = getZonedParts(now, timeZone);
-
-  // Build map of dateKey -> day data
-  const dayRows = loadDaysInRange(db, bucketCount);
-  const dayMap = {};
-  for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
-
-  return Array.from({ length: bucketCount }, (_, i) => {
-    const dayStart = zonedTimeToUtcMs(todayParts.year, todayParts.month, todayParts.day - (bucketCount - 1 - i), 0, 0, 0, timeZone);
-    const dateKey = getUsageDateKey(dayStart, timeZone);
-    const dayData = dayMap[dateKey];
-    return {
-      label: formatUsageDay(dayStart, timeZone),
-      tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
-      cost: dayData ? (dayData.cost || 0) : 0,
-    };
+  const todayStart = zonedTimeToUtcMs(todayParts.year, todayParts.month, todayParts.day, 0, 0, 0, timeZone);
+  const startTime = todayStart - (bucketCount - 1) * 86400000;
+  const buckets = Array.from({ length: bucketCount }, (_, i) => {
+    const dayStart = startTime + i * 86400000;
+    return { dateKey: getUsageDateKey(dayStart, timeZone), label: formatUsageDay(dayStart, timeZone), tokens: 0, cost: 0 };
   });
+  const bucketByDate = Object.fromEntries(buckets.map((bucket) => [bucket.dateKey, bucket]));
+  const rows = db.all(
+    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
+    [new Date(startTime).toISOString(), new Date(now).toISOString()]
+  );
+
+  for (const r of rows) {
+    const bucket = bucketByDate[getUsageDateKey(new Date(r.timestamp).getTime(), timeZone)];
+    if (!bucket) continue;
+    bucket.tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
+    bucket.cost += r.cost || 0;
+  }
+
+  return buckets.map(({ dateKey, ...bucket }) => bucket);
 }
 function formatLogDate(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
