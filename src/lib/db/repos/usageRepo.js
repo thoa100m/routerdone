@@ -61,6 +61,12 @@ function getUsageDateKey(timestamp = Date.now(), timeZone = getUsageTimeZone()) 
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
+// Exported for callers that need the local-day key (e.g. per-key daily quota
+// reset boundary). Mirrors the value persisted into usageDaily.dateKey.
+export function getUsageDateKeyPublic(timestamp = Date.now(), preferredTimeZone) {
+  return getUsageDateKey(timestamp, getUsageTimeZone(preferredTimeZone));
+}
+
 export function getUsagePeriodRange(period = "all", preferredTimeZone) {
   const now = Date.now();
   const timeZone = getUsageTimeZone(preferredTimeZone);
@@ -415,6 +421,30 @@ export async function saveRequestUsage(entry) {
       const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
       const next = (cur ? parseInt(cur.value, 10) : 0) + 1;
       db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
+
+      // Per-API-key usage counters (resale / donate quota). Same tx as the
+      // usage history write → no double-count, no lost update when the next
+      // request's pre-check reads these counters. Best-effort: a missing /
+      // non-managed key (local mode, CLI token) silently skips the increment.
+      if (entry.apiKey) {
+        try {
+          const totalDelta = (promptTokens || 0) + (completionTokens || 0);
+          if (totalDelta > 0) {
+            const keyRow = db.get(`SELECT id, usedTokens, usedDailyTokens, usedDailyDateKey FROM apiKeys WHERE key = ?`, [entry.apiKey]);
+            if (keyRow) {
+              const sameDay = keyRow.usedDailyDateKey && keyRow.usedDailyDateKey === dateKey;
+              const nextDaily = sameDay ? (keyRow.usedDailyTokens || 0) + totalDelta : totalDelta;
+              const nextDailyDateKey = sameDay ? keyRow.usedDailyDateKey : dateKey;
+              db.run(
+                `UPDATE apiKeys SET usedTokens = ?, usedDailyTokens = ?, usedDailyDateKey = ? WHERE id = ?`,
+                [(keyRow.usedTokens || 0) + totalDelta, nextDaily, nextDailyDateKey, keyRow.id]
+              );
+            }
+          }
+        } catch {
+          // Non-fatal: don't roll back the usage write for a counter bump.
+        }
+      }
     });
 
     pushToRing(entry);
