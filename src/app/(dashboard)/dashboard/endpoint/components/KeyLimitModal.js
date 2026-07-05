@@ -204,16 +204,17 @@ export default function KeyLimitModal({ isOpen, onClose, keyRecord, onSaved }) {
           {allowedType === "model" && (
             <div className="flex flex-col gap-1">
               <label className="text-xs text-text-muted">Model name</label>
-              <input
-                list="keylimit-models-list"
+              <select
                 value={allowedValue}
                 onChange={(e) => setAllowedValue(e.target.value)}
-                placeholder="e.g. gpt-5"
                 className="px-3 py-2 rounded-lg bg-surface-2 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-              <datalist id="keylimit-models-list">
-                {models.map((m) => (<option key={m} value={m} />))}
-              </datalist>
+              >
+                <option value="">— pick a model —</option>
+                {models.map((m) => (<option key={m} value={m}>{m}</option>))}
+              </select>
+              {models.length === 0 && (
+                <p className="text-xs text-text-muted">No models available. Check your provider connections.</p>
+              )}
             </div>
           )}
           {allowedType === "combo" && (
