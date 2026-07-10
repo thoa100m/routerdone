@@ -1,4 +1,17 @@
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM } from "../schema/index.js";
+import { isValidImageDataUri } from "../concerns/image.js";
+
+const IMAGE_OMITTED = "[image omitted: invalid image data]";
+
+function normalizeImageReference(block) {
+  const raw = typeof block?.image_url === "string"
+    ? block.image_url
+    : block?.image_url?.url;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  if (raw.startsWith("data:") && !isValidImageDataUri(raw)) return null;
+  if (!raw.startsWith("data:") && !/^https?:\/\/\S+$/i.test(raw)) return null;
+  return raw;
+}
 
 /**
  * Normalize Responses API input to array format.
@@ -27,8 +40,9 @@ export function toOpenAIContentBlock(block) {
   if (block?.type === RESPONSES_ITEM.INPUT_TEXT) return { type: OPENAI_BLOCK.TEXT, text: block.text };
   if (block?.type === RESPONSES_ITEM.OUTPUT_TEXT) return { type: OPENAI_BLOCK.TEXT, text: block.text };
   if (block?.type === RESPONSES_ITEM.INPUT_IMAGE || Object.hasOwn(block || {}, "image_url")) {
-    const url = block.image_url || block.file_id || "";
-    return { type: OPENAI_BLOCK.IMAGE_URL, image_url: { url, detail: block.detail || "auto" } };
+    const url = normalizeImageReference(block);
+    if (!url) return { type: OPENAI_BLOCK.TEXT, text: IMAGE_OMITTED };
+    return { type: OPENAI_BLOCK.IMAGE_URL, image_url: { url, detail: block.detail || block.image_url?.detail || "auto" } };
   }
   return block;
 }

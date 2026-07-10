@@ -166,13 +166,15 @@ export class CodexExecutor extends BaseExecutor {
     for (const item of body.input) {
       if (!Array.isArray(item.content)) continue;
       const pending = item.content.map(async (c) => {
-        if (c.type !== "image_url") return c;
+        if (c.type !== "image_url" && c.type !== "input_image") return c;
         const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
-        const detail = c.image_url?.detail || "auto";
-        if (!url) return c;
+        const detail = c.image_url?.detail || c.detail || "auto";
+        if (!url || typeof url !== "string") return { type: "input_text", text: "[image omitted: invalid image data]" };
         if (url.startsWith("data:")) return { type: "input_image", image_url: url, detail };
         const fetched = await fetchImageAsBase64(url, { timeoutMs: 15000 });
-        return { type: "input_image", image_url: fetched?.url || url, detail };
+        return fetched
+          ? { type: "input_image", image_url: fetched.url, detail }
+          : { type: "input_text", text: "[image omitted: image fetch failed]" };
       });
       item.content = await Promise.all(pending);
     }

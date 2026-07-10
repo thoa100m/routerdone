@@ -120,17 +120,20 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Expose raw client headers to translators/executors for session-id resolution
   if (credentials) credentials.rawHeaders = clientRawRequest?.headers || {};
 
-  // Auto-strip media blocks the model can't read (vision/audio/pdf) before translation.
-  if (!passthrough) {
+  // Validate/strip media before dispatch, including native passthrough. Translation
+  // may be skipped, but malformed client media must never bypass the boundary.
+  {
     const caps = getCapabilitiesForModel(provider, model);
     if (stripUnsupportedModalities(body, sourceFormat, caps)) {
       log?.debug?.("MODALITY", `stripped unsupported media for ${provider}/${model}`);
     }
-    // Convert remote image URLs to base64 for targets that can't fetch URLs.
-    try {
-      const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: undefined });
-      if (n > 0) log?.debug?.("MODALITY", `prefetched ${n} remote image(s) for ${targetFormat}`);
-    } catch (e) { log?.warn?.("MODALITY", `image prefetch failed: ${e.message}`); }
+    // Remote prefetch remains disabled for native passthrough to preserve native semantics.
+    if (!passthrough) {
+      try {
+        const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: undefined });
+        if (n > 0) log?.debug?.("MODALITY", `prefetched ${n} remote image(s) for ${targetFormat}`);
+      } catch (e) { log?.warn?.("MODALITY", `image prefetch failed: ${e.message}`); }
+    }
   }
 
   let translatedBody;
@@ -166,6 +169,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Token savers: applied at the final body just before dispatch
   // Covers both passthrough (source shape) and translated (target shape) flows
   const finalFormat = passthrough ? sourceFormat : targetFormat;
+
+  // Final image boundary after translation: translators can create a malformed
+  // target image shape even when the source request was valid.
+  const finalCaps = getCapabilitiesForModel(provider, model);
+  if (stripUnsupportedModalities(translatedBody, finalFormat, finalCaps)) {
+    log?.debug?.("MODALITY", `validated final media shape for ${provider}/${model}`);
+  }
 
   // TTS models don't support tool messages/function calling
   if (getModelType(alias, model) === "tts" && translatedBody.messages) {

@@ -8,6 +8,7 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { normalizeResponsesInput, toOpenAIContentBlock } from "../formats/responsesApi.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM } from "../schema/index.js";
+import { isValidImageDataUri } from "../concerns/image.js";
 
 // Responses API enforces max 64 chars on call_id (#393)
 const MAX_CALL_ID_LEN = 64;
@@ -241,7 +242,13 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
               const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
               return { type: RESPONSES_ITEM.INPUT_IMAGE, image_url: url, detail: c.image_url?.detail || "auto" };
             }
-            if (c.type === RESPONSES_ITEM.INPUT_IMAGE) return c;
+            if (c.type === RESPONSES_ITEM.INPUT_IMAGE) {
+              const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
+              if (typeof url !== "string" || (url.startsWith("data:") ? !isValidImageDataUri(url) : !/^https?:\/\/\S+$/i.test(url))) {
+                return { type: contentType, text: "[image omitted: invalid image data]" };
+              }
+              return { ...c, image_url: url };
+            }
             // Serialize any unknown type (tool_use, tool_result, thinking, etc.) as text
             const text = c.text || c.content || JSON.stringify(c);
             return { type: contentType, text: typeof text === "string" ? text : JSON.stringify(text) };
