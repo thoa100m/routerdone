@@ -18,24 +18,31 @@ import { handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { resolveRoutePolicy } from "open-sse/services/routePolicy.js";
-import { buildContextSummaryBackup, isContextBackupEligible, normalizeContextBackupConfig } from "../services/contextSummaryBackup.js";
+import { buildContextSummaryBackup, detectContextBackupFormat, isContextBackupEligible, normalizeContextBackupConfig } from "../services/contextSummaryBackup.js";
 
-function estimateBackupTokens(body) {
-  return Math.ceil(JSON.stringify(body?.input || []).length / 4);
+function estimateBackupTokens(body, format) {
+  const source = format === "responses" ? body?.input : body?.messages;
+  return Math.ceil(JSON.stringify(source || []).length / 4);
 }
 
-function applyContextSummaryBackup(body, settings, request, connectionId) {
+function applyContextSummaryBackup(body, settings, request) {
   let config;
   try { config = normalizeContextBackupConfig(settings?.routerDoneContextBackup); } catch { return body; }
   const pathname = new URL(request.url).pathname;
-  const isResponses = pathname === "/v1/responses" || pathname === "/api/v1/responses";
-  if (!config.enabled || !isContextBackupEligible(body, { isResponses })) return body;
-  if (estimateBackupTokens(body) < config.thresholdTokens) return body;
-  return buildContextSummaryBackup(body, config) || body;
+  const format = detectContextBackupFormat(body, pathname);
+  const details = { format: format || "unsupported", threshold: config.thresholdTokens };
+  if (!config.enabled) { log.info("CONTEXT-BACKUP", "skipped: disabled", details); return body; }
+  if (!format || !isContextBackupEligible(body, { format })) { log.info("CONTEXT-BACKUP", "skipped: unsafe or unsupported shape", details); return body; }
+  const estimatedTokens = estimateBackupTokens(body, format);
+  if (estimatedTokens < config.thresholdTokens) { log.info("CONTEXT-BACKUP", "skipped: below threshold", { ...details, estimatedTokens }); return body; }
+  const backedUp = buildContextSummaryBackup(body, { ...config, format });
+  if (!backedUp) { log.info("CONTEXT-BACKUP", "skipped: insufficient turns/content", { ...details, estimatedTokens }); return body; }
+  log.info("CONTEXT-BACKUP", "applied", { ...details, estimatedTokens, originalItems: body[format === "responses" ? "input" : "messages"].length, backedUpItems: backedUp[format === "responses" ? "input" : "messages"].length });
+  return backedUp;
 }
 
 function maybeBackupBody(body, settings, request) {
-  return applyContextSummaryBackup(body, settings, request, null);
+  return applyContextSummaryBackup(body, settings, request);
 }
 
 const MODEL_REDIRECTS = new Map([

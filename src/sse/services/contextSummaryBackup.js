@@ -25,26 +25,42 @@ function textOnly(value) {
   return "";
 }
 
-export function isContextBackupEligible(body, { isResponses = false } = {}) {
-  if (!isResponses || !body || body._compact || !Array.isArray(body.input)) return false;
-  if (body.tools?.length || body.tool_choice || body.parallel_tool_calls || body.include) return false;
-  return body.input.every((item) => {
-    if (!(item?.type === "message" && typeof item.role === "string" && ["user", "assistant", "system"].includes(item.role))) return false;
-    if (typeof item.content === "string") return true;
-    return Array.isArray(item.content) && item.content.every((part) => part && ["text", "input_text", "output_text"].includes(part.type) && typeof part.text === "string");
-  });
+function isTextMessage(item) {
+  if (!item || typeof item.role !== "string" || !["user", "assistant", "system"].includes(item.role)) return false;
+  if (typeof item.content === "string") return true;
+  return Array.isArray(item.content) && item.content.every((part) => part && ["text", "input_text", "output_text"].includes(part.type) && typeof part.text === "string");
 }
 
-export function buildContextSummaryBackup(body, { retainRecentTurns = 3 } = {}) {
-  const input = Array.isArray(body?.input) ? body.input : [];
+export function isContextBackupEligible(body, { format } = {}) {
+  if (!body || body._compact) return false;
+  if (body.tools?.length || body.tool_choice || body.parallel_tool_calls || body.include || body.functions?.length || body.function_call) return false;
+  if (format === "responses") return Array.isArray(body.input) && body.input.every((item) => item?.type === "message" && isTextMessage(item));
+  if (format === "chat" || format === "messages") return Array.isArray(body.messages) && body.messages.every(isTextMessage);
+  return false;
+}
+
+export function buildContextSummaryBackup(body, { retainRecentTurns = 3, format } = {}) {
+  const isResponses = format === "responses" || (!format && Array.isArray(body?.input));
+  const key = isResponses ? "input" : "messages";
+  const items = Array.isArray(body?.[key]) ? body[key] : [];
   const keep = Math.max(1, retainRecentTurns) * 2;
-  if (input.length <= keep) return null;
-  const older = input.slice(0, -keep);
-  const recent = input.slice(-keep);
+  if (items.length <= keep) return null;
+  const older = items.slice(0, -keep);
+  const recent = items.slice(-keep);
   const lines = older.map((item) => `${item.role}: ${textOnly(item.content).replace(/\s+/g, " ").trim()}`).filter((x) => x.replace(/^[^:]+:\s*/, "").trim());
   if (!lines.length) return null;
   const summary = `[RouterDone Context Summary Backup]\n${lines.join("\n")}`;
-  return { ...body, input: [{ type: "message", role: "system", content: [{ type: "input_text", text: summary }] }, ...recent] };
+  const summaryItem = isResponses
+    ? { type: "message", role: "system", content: [{ type: "input_text", text: summary }] }
+    : { role: "system", content: summary };
+  return { ...body, [key]: [summaryItem, ...recent] };
+}
+
+export function detectContextBackupFormat(body, pathname = "") {
+  if (pathname.endsWith("/responses") || pathname.endsWith("/responses/compact")) return "responses";
+  if (pathname.endsWith("/messages")) return "messages";
+  if (pathname.endsWith("/chat/completions")) return "chat";
+  return Array.isArray(body?.messages) ? "chat" : Array.isArray(body?.input) ? "responses" : null;
 }
 
 export const CONTEXT_BACKUP_LIMITS = {
