@@ -52,8 +52,8 @@ const DEFAULT_SETTINGS = {
   responsesCompactionEnabled: true,
   responsesCompactionThresholdTokens: 81000,
   routerDoneContextBackup: {
-    enabled: false,
-    thresholdTokens: 45000,
+    enabled: true,
+    thresholdTokens: 81000,
     retainRecentTurns: 3,
     codexConnectionId: "",
   },

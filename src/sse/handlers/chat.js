@@ -31,8 +31,8 @@ function applyContextSummaryBackup(body, settings, request) {
   const pathname = new URL(request.url).pathname;
   const format = detectContextBackupFormat(body, pathname);
   const details = { format: format || "unsupported", threshold: config.thresholdTokens };
-  if (!config.enabled) { log.info("CONTEXT-BACKUP", "skipped: disabled", details); return body; }
-  if (!format || !isContextBackupEligible(body, { format })) { log.info("CONTEXT-BACKUP", "skipped: unsafe or unsupported shape", details); return body; }
+  if (!config.enabled) { return body; }
+  if (!format || !isContextBackupEligible(body, { format })) { return body; }
   const estimatedTokens = estimateBackupTokens(body, format);
   if (estimatedTokens < config.thresholdTokens) { log.info("CONTEXT-BACKUP", "skipped: below threshold", { ...details, estimatedTokens }); return body; }
   const backedUp = buildContextSummaryBackup(body, { ...config, format });

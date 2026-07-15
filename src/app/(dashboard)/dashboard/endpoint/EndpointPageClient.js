@@ -259,7 +259,7 @@ export default function APIPageClient({ machineId }) {
         setCavemanLevel(data.cavemanLevel || "full");
         setPonytailEnabled(!!data.ponytailEnabled);
         setPonytailLevel(data.ponytailLevel || "full");
-        setContextBackup(data.routerDoneContextBackup || { enabled: false, thresholdTokens: 45000, retainRecentTurns: 3, codexConnectionId: "" });
+        setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "" });
         setResponsesCompactionEnabled(data.responsesCompactionEnabled !== false);
         setResponsesCompactionThresholdTokens(data.responsesCompactionThresholdTokens || 81000);
       }
