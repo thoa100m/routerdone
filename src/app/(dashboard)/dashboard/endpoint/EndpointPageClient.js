@@ -50,7 +50,7 @@ export default function APIPageClient({ machineId }) {
   const [cavemanLevel, setCavemanLevel] = useState("full");
   const [ponytailEnabled, setPonytailEnabled] = useState(false);
   const [ponytailLevel, setPonytailLevel] = useState("full");
-  const [contextBackup, setContextBackup] = useState({ enabled: false, thresholdTokens: 45000, retainRecentTurns: 3, codexConnectionId: "" });
+  const [contextBackup, setContextBackup] = useState({ enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "" });
   const [responsesCompactionEnabled, setResponsesCompactionEnabled] = useState(true);
   const [responsesCompactionThresholdTokens, setResponsesCompactionThresholdTokens] = useState(81000);
   const [locale, setLocale] = useState("en");
@@ -259,7 +259,7 @@ export default function APIPageClient({ machineId }) {
         setCavemanLevel(data.cavemanLevel || "full");
         setPonytailEnabled(!!data.ponytailEnabled);
         setPonytailLevel(data.ponytailLevel || "full");
-        setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "" });
+        setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "" });
         setResponsesCompactionEnabled(data.responsesCompactionEnabled !== false);
         setResponsesCompactionThresholdTokens(data.responsesCompactionThresholdTokens || 81000);
       }
@@ -1415,6 +1415,8 @@ export default function APIPageClient({ machineId }) {
                 <Input type="number" min="36000" step="1" value={contextBackup.thresholdTokens} onChange={(e) => setContextBackup((v) => ({ ...v, thresholdTokens: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, thresholdTokens: Number(contextBackup.thresholdTokens) } })} className="w-32" />
                 <label className="text-xs text-text-muted">tokens; keep turns</label>
                 <Input type="number" min="1" value={contextBackup.retainRecentTurns} onChange={(e) => setContextBackup((v) => ({ ...v, retainRecentTurns: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, retainRecentTurns: Number(contextBackup.retainRecentTurns) } })} className="w-20" />
+                <label className="text-xs text-text-muted">compact model</label>
+                <Input value={contextBackup.compressModel || ""} placeholder="Optional, e.g. deepseek-v4-flash" onChange={(e) => setContextBackup((v) => ({ ...v, compressModel: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, compressModel: (contextBackup.compressModel || "").trim() } })} className="w-64" />
               </div>
             )}
           </div>

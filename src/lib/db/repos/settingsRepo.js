@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
     thresholdTokens: 81000,
     retainRecentTurns: 3,
     codexConnectionId: "",
+    compressModel: "",
   },
   consoleLogRetentionMs: 60 * 60 * 1000,
   modelRedirects: {

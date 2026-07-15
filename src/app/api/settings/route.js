@@ -105,7 +105,7 @@ export async function PATCH(request) {
       }
       const threshold = Number(cfg.thresholdTokens ?? 45000);
       const retain = Number(cfg.retainRecentTurns ?? 3);
-      if (typeof cfg.enabled !== "boolean" || !Number.isSafeInteger(threshold) || threshold < 36000 || !Number.isInteger(retain) || retain < 1 || retain > 6 || (cfg.codexConnectionId !== undefined && typeof cfg.codexConnectionId !== "string")) {
+      if (typeof cfg.enabled !== "boolean" || !Number.isSafeInteger(threshold) || threshold < 36000 || !Number.isInteger(retain) || retain < 1 || retain > 6 || (cfg.codexConnectionId !== undefined && typeof cfg.codexConnectionId !== "string") || (cfg.compressModel !== undefined && (typeof cfg.compressModel !== "string" || cfg.compressModel.length > 200))) {
         return NextResponse.json({ error: "Invalid context backup settings" }, { status: 400 });
       }
       body.routerDoneContextBackup = {
@@ -113,6 +113,7 @@ export async function PATCH(request) {
         thresholdTokens: threshold,
         retainRecentTurns: retain,
         codexConnectionId: cfg.codexConnectionId || "",
+        compressModel: typeof cfg.compressModel === "string" ? cfg.compressModel.trim() : "",
       };
     }
 

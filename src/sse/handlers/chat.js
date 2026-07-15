@@ -18,29 +18,60 @@ import { handleComboChat, handleFusionChat } from "open-sse/services/combo.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { resolveRoutePolicy } from "open-sse/services/routePolicy.js";
-import { buildContextSummaryBackup, detectContextBackupFormat, isContextBackupEligible, normalizeContextBackupConfig } from "../services/contextSummaryBackup.js";
+import { detectContextBackupFormat, isContextBackupEligible, normalizeContextBackupConfig } from "../services/contextSummaryBackup.js";
 
 function estimateBackupTokens(body, format) {
   const source = format === "responses" ? body?.input : body?.messages;
   return Math.ceil(JSON.stringify(source || []).length / 4);
 }
 
-function applyContextSummaryBackup(body, settings, request) {
+async function applyContextSummaryBackup(body, settings, request) {
   let config;
   try { config = normalizeContextBackupConfig(settings?.routerDoneContextBackup); } catch { return body; }
+  if (!config.enabled || request.headers.get("x-routerdone-context-compact") === "1") return body;
   const pathname = new URL(request.url).pathname;
   const format = detectContextBackupFormat(body, pathname);
-  const details = { format: format || "unsupported", threshold: config.thresholdTokens };
-  if (!config.enabled) { return body; }
-  if (!format || !isContextBackupEligible(body, { format })) { return body; }
+  if (!format || !isContextBackupEligible(body, { format })) return body;
   const estimatedTokens = estimateBackupTokens(body, format);
-  if (estimatedTokens < config.thresholdTokens) { log.info("CONTEXT-BACKUP", "skipped: below threshold", { ...details, estimatedTokens }); return body; }
-  const backedUp = buildContextSummaryBackup(body, { ...config, format });
-  if (!backedUp) { log.info("CONTEXT-BACKUP", "skipped: insufficient turns/content", { ...details, estimatedTokens }); return body; }
-  log.info("CONTEXT-BACKUP", "applied", { ...details, estimatedTokens, originalItems: body[format === "responses" ? "input" : "messages"].length, backedUpItems: backedUp[format === "responses" ? "input" : "messages"].length });
-  return backedUp;
+  if (estimatedTokens < config.thresholdTokens) return body;
+
+  const key = format === "responses" ? "input" : "messages";
+  const keep = Math.max(1, config.retainRecentTurns) * 2;
+  const items = body[key];
+  const older = items.slice(0, -keep);
+  const recent = items.slice(-keep);
+  const lines = older.map((item) => `${item.role}: ${JSON.stringify(item.content)}`).join("\n");
+  let summaryText = "";
+  if (config.compressModel) {
+    try {
+      const compactRequest = new Request(new URL("/v1/chat/completions", request.url), {
+        method: "POST",
+        headers: new Headers({ "content-type": "application/json", "authorization": request.headers.get("authorization") || "", "x-routerdone-context-compact": "1" }),
+        body: JSON.stringify({ model: config.compressModel, stream: false, messages: [
+          { role: "system", content: "Summarize the older conversation faithfully. Preserve decisions, requirements, identifiers, errors, and unfinished work. Output only the compact summary." },
+          { role: "user", content: lines },
+        ] }),
+      });
+      const compactResponse = await handleChat(compactRequest);
+      const compactJson = await compactResponse.json();
+      summaryText = compactJson?.choices?.[0]?.message?.content || compactJson?.output_text || "";
+    } catch (error) {
+      log.warn("CONTEXT-BACKUP", `model ${config.compressModel} failed; using local summary: ${error.message}`);
+    }
+  }
+  if (!summaryText) summaryText = `[RouterDone Context Summary Backup]\n${older.map((item) => `${item.role}: ${textOnlyForBackup(item.content)}`).join("\n")}`;
+  const summaryItem = format === "responses"
+    ? { type: "message", role: "system", content: [{ type: "input_text", text: summaryText }] }
+    : { role: "system", content: summaryText };
+  log.info("CONTEXT-BACKUP", `applied format=${format} estimatedTokens=${estimatedTokens} model=${config.compressModel || "local"}`);
+  return { ...body, [key]: [summaryItem, ...recent] };
 }
 
+function textOnlyForBackup(value) {
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+  if (Array.isArray(value)) return value.map((part) => part?.text || "").join(" ").replace(/\s+/g, " ").trim();
+  return "";
+}
 function maybeBackupBody(body, settings, request) {
   return applyContextSummaryBackup(body, settings, request);
 }
@@ -183,7 +214,7 @@ export async function handleChat(request, clientRawRequest = null) {
 
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
-  body = maybeBackupBody(body, settings, request);
+  body = await maybeBackupBody(body, settings, request);
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};
