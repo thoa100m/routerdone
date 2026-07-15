@@ -8,6 +8,7 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { normalizeResponsesInput, toOpenAIContentBlock } from "../formats/responsesApi.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM } from "../schema/index.js";
+import { isValidImageDataUri } from "../concerns/image.js";
 
 // Responses API enforces max 64 chars on call_id (#393)
 const MAX_CALL_ID_LEN = 64;
@@ -202,7 +203,25 @@ function normalizeToolParameters(params) {
  */
 export function openaiToOpenAIResponsesRequest(model, body, stream, credentials) {
   // Body already in Responses API format (e.g. Cursor CLI calling /chat/completions with input[])
-  if (body.input) return { ...body, model, stream: true };
+  if (body.input) {
+    const normalized = { ...body, model, stream: true, input: normalizeResponsesInput(body.input) };
+    if (Array.isArray(normalized.input)) {
+      normalized.input = normalized.input.map((item) => ({
+        ...item,
+        ...(Array.isArray(item?.content) ? {
+          content: item.content.map((content) => {
+            if (content?.type !== RESPONSES_ITEM.INPUT_IMAGE) return content;
+            const url = typeof content.image_url === "string" ? content.image_url : content.image_url?.url;
+            const valid = typeof url === "string" && (url.startsWith("data:") ? isValidImageDataUri(url) : /^https?:\/\/\S+$/i.test(url));
+            return valid
+              ? { ...content, image_url: url }
+              : { type: RESPONSES_ITEM.INPUT_TEXT, text: "[image omitted: invalid image data]" };
+          }),
+        } : {}),
+      }));
+    }
+    return normalized;
+  }
 
   const result = {
     model,
