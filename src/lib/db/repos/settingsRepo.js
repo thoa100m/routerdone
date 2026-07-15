@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   contextGuardMaxBytes: 240_000,
   contextGuardKeepRecent: 3,
   contextGuardHardCapTokens: 0,
-  responsesCompactionEnabled: true,
+  responsesCompactionEnabled: false,
   responsesCompactionThresholdTokens: 81000,
   routerDoneContextBackup: {
     enabled: true,

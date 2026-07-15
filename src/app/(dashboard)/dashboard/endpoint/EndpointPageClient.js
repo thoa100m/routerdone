@@ -51,7 +51,8 @@ export default function APIPageClient({ machineId }) {
   const [ponytailEnabled, setPonytailEnabled] = useState(false);
   const [ponytailLevel, setPonytailLevel] = useState("full");
   const [contextBackup, setContextBackup] = useState({ enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "" });
-  const [responsesCompactionEnabled, setResponsesCompactionEnabled] = useState(true);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [responsesCompactionEnabled, setResponsesCompactionEnabled] = useState(false);
   const [responsesCompactionThresholdTokens, setResponsesCompactionThresholdTokens] = useState(81000);
   const [locale, setLocale] = useState("en");
 
@@ -236,6 +237,16 @@ export default function APIPageClient({ machineId }) {
     } catch { /* ignore poll errors */ }
   };
 
+  const loadModels = async () => {
+    try {
+      const res = await fetch("/api/models", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableModels(Array.isArray(data.models) ? data.models : []);
+      }
+    } catch { /* optional model list */ }
+  };
+
   const loadSettings = async () => {
     setTunnelChecking(true);
     try {
@@ -260,7 +271,7 @@ export default function APIPageClient({ machineId }) {
         setPonytailEnabled(!!data.ponytailEnabled);
         setPonytailLevel(data.ponytailLevel || "full");
         setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "" });
-        setResponsesCompactionEnabled(data.responsesCompactionEnabled !== false);
+        setResponsesCompactionEnabled(data.responsesCompactionEnabled === true);
         setResponsesCompactionThresholdTokens(data.responsesCompactionThresholdTokens || 81000);
       }
       if (statusRes.ok) {
@@ -1393,7 +1404,7 @@ export default function APIPageClient({ machineId }) {
         </div>
         <div className="flex items-center justify-between pt-4 border-t border-border gap-4 flex-wrap">
           <div className="min-w-0 flex-1">
-            <p className="font-medium">OpenAI Responses server-side compaction</p>
+            <p className="font-medium">OpenAI Responses server-side compaction (chỉ khi upstream hỗ trợ /v1/responses)</p>
             <p className="text-sm text-text-muted mt-1">Native opaque compaction item; no separate compression model required.</p>
             {responsesCompactionEnabled && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1416,7 +1427,7 @@ export default function APIPageClient({ machineId }) {
                 <label className="text-xs text-text-muted">tokens; keep turns</label>
                 <Input type="number" min="1" value={contextBackup.retainRecentTurns} onChange={(e) => setContextBackup((v) => ({ ...v, retainRecentTurns: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, retainRecentTurns: Number(contextBackup.retainRecentTurns) } })} className="w-20" />
                 <label className="text-xs text-text-muted">compact model</label>
-                <Input value={contextBackup.compressModel || ""} placeholder="Optional, e.g. deepseek-v4-flash" onChange={(e) => setContextBackup((v) => ({ ...v, compressModel: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, compressModel: (contextBackup.compressModel || "").trim() } })} className="w-64" />
+                <select value={contextBackup.compressModel || ""} onChange={(e) => { const value = e.target.value; setContextBackup((v) => ({ ...v, compressModel: value })); patchSetting({ routerDoneContextBackup: { ...contextBackup, compressModel: value } }); }} className="h-10 w-64 rounded-md border border-border bg-surface px-3 text-sm text-text-primary"><option value="">Local summary</option>{availableModels.map((item) => <option key={item.fullModel} value={item.fullModel}>{item.alias || item.model} ({item.provider})</option>)}</select>
               </div>
             )}
           </div>
