@@ -54,6 +54,7 @@ export default function APIPageClient({ machineId }) {
   const [availableModels, setAvailableModels] = useState([]);
   const [activeProviders, setActiveProviders] = useState([]);
   const [showCompactModelSelect, setShowCompactModelSelect] = useState(false);
+  const [compactModelSlot, setCompactModelSlot] = useState("primary");
   const [responsesCompactionEnabled, setResponsesCompactionEnabled] = useState(false);
   const [responsesCompactionThresholdTokens, setResponsesCompactionThresholdTokens] = useState(81000);
   const [locale, setLocale] = useState("en");
@@ -282,7 +283,7 @@ export default function APIPageClient({ machineId }) {
         setCavemanLevel(data.cavemanLevel || "full");
         setPonytailEnabled(!!data.ponytailEnabled);
         setPonytailLevel(data.ponytailLevel || "full");
-        setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "" });
+        setContextBackup(data.routerDoneContextBackup || { enabled: true, thresholdTokens: 81000, retainRecentTurns: 3, codexConnectionId: "", compressModel: "", compressFallbackModel: "" });
         setResponsesCompactionEnabled(data.responsesCompactionEnabled === true);
         setResponsesCompactionThresholdTokens(data.responsesCompactionThresholdTokens || 81000);
       }
@@ -1439,7 +1440,9 @@ export default function APIPageClient({ machineId }) {
                 <label className="text-xs text-text-muted">tokens; keep turns</label>
                 <Input type="number" min="1" value={contextBackup.retainRecentTurns} onChange={(e) => setContextBackup((v) => ({ ...v, retainRecentTurns: e.target.value }))} onBlur={() => patchSetting({ routerDoneContextBackup: { ...contextBackup, retainRecentTurns: Number(contextBackup.retainRecentTurns) } })} className="w-20" />
                 <label className="text-xs text-text-muted">compact model</label>
-                <Button size="sm" variant="secondary" onClick={() => setShowCompactModelSelect(true)}>{contextBackup.compressModel || "Local summary"}</Button>
+                <Button size="sm" variant="secondary" onClick={() => { setCompactModelSlot("primary"); setShowCompactModelSelect(true); }}>{contextBackup.compressModel || "Local summary"}</Button>
+                <label className="text-xs text-text-muted">fallback</label>
+                <Button size="sm" variant="secondary" onClick={() => { setCompactModelSlot("fallback"); setShowCompactModelSelect(true); }}>{contextBackup.compressFallbackModel || "Local summary"}</Button>
               </div>
             )}
           </div>
@@ -1547,15 +1550,16 @@ export default function APIPageClient({ machineId }) {
         onClose={() => setShowCompactModelSelect(false)}
         onSelect={(selection) => {
           const value = selection?.value || "";
-          const next = { ...contextBackup, compressModel: value };
+          const next = { ...contextBackup, [compactModelSlot === "fallback" ? "compressFallbackModel" : "compressModel"]: value };
           setContextBackup(next);
           patchSetting({ routerDoneContextBackup: next });
           setShowCompactModelSelect(false);
         }}
         activeProviders={activeProviders}
-        selectedModel={contextBackup.compressModel || null}
+        selectedModel={(compactModelSlot === "fallback" ? contextBackup.compressFallbackModel : contextBackup.compressModel) || null}
         title="Select Context Compact Model"
         closeOnSelect={true}
+        includeCompactModels
       />
       {/* Add Key Modal */}
       <Modal

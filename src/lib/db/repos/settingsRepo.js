@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
     retainRecentTurns: 3,
     codexConnectionId: "",
     compressModel: "",
+    compressFallbackModel: "",
   },
   consoleLogRetentionMs: 60 * 60 * 1000,
   modelRedirects: {

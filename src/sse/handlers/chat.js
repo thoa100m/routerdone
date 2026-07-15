@@ -42,12 +42,14 @@ async function applyContextSummaryBackup(body, settings, request) {
   const recent = items.slice(-keep);
   const lines = older.map((item) => `${item.role}: ${JSON.stringify(item.content)}`).join("\n");
   let summaryText = "";
-  if (config.compressModel) {
+  const compactModels = [config.compressModel, config.compressFallbackModel].filter((model, index, list) => model && list.indexOf(model) === index);
+  for (const compactModel of compactModels) {
+    if (summaryText) break;
     try {
       const compactRequest = new Request(new URL("/v1/chat/completions", request.url), {
         method: "POST",
         headers: new Headers({ "content-type": "application/json", "authorization": request.headers.get("authorization") || "", "x-routerdone-context-compact": "1" }),
-        body: JSON.stringify({ model: config.compressModel, stream: false, messages: [
+        body: JSON.stringify({ model: compactModel, stream: false, messages: [
           { role: "system", content: "Summarize the older conversation faithfully. Preserve decisions, requirements, identifiers, errors, and unfinished work. Output only the compact summary." },
           { role: "user", content: lines },
         ] }),
@@ -55,15 +57,15 @@ async function applyContextSummaryBackup(body, settings, request) {
       const compactResponse = await handleChat(compactRequest);
       const compactJson = await compactResponse.json();
       summaryText = compactJson?.choices?.[0]?.message?.content || compactJson?.output_text || "";
+      if (summaryText) log.info("CONTEXT-BACKUP", `model=${compactModel} applied`);
     } catch (error) {
-      log.warn("CONTEXT-BACKUP", `model ${config.compressModel} failed; using local summary: ${error.message}`);
+      log.warn("CONTEXT-BACKUP", `model ${compactModel} failed; trying fallback: ${error.message}`);
     }
-  }
-  if (!summaryText) summaryText = `[RouterDone Context Summary Backup]\n${older.map((item) => `${item.role}: ${textOnlyForBackup(item.content)}`).join("\n")}`;
+  }  if (!summaryText) summaryText = `[RouterDone Context Summary Backup]\n${older.map((item) => `${item.role}: ${textOnlyForBackup(item.content)}`).join("\n")}`;
   const summaryItem = format === "responses"
     ? { type: "message", role: "system", content: [{ type: "input_text", text: summaryText }] }
     : { role: "system", content: summaryText };
-  log.info("CONTEXT-BACKUP", `applied format=${format} estimatedTokens=${estimatedTokens} model=${config.compressModel || "local"}`);
+  log.info("CONTEXT-BACKUP", `applied format=${format} estimatedTokens=${estimatedTokens} model=${config.compressModel || config.compressFallbackModel || "local"}`);
   return { ...body, [key]: [summaryItem, ...recent] };
 }
 
