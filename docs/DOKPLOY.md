@@ -6,6 +6,13 @@ Deploy RouterDone as a Docker Compose application.
 
 Use `docker-compose.dokploy.yml` as the compose file. Keep the service name as `routerdone`; the Dokploy domain mapping is attached to that service.
 
+> **Domains must be followed by a deploy.** Dokploy only regenerates the
+> Traefik router for a domain when the compose is (re)deployed. If you add or
+> edit a domain but do not redeploy, the public URL keeps returning
+> `404 page not found` (Traefik has no matching router) even though the
+> container is running. After touching **Domains**, trigger a deployment
+> (push to `main`, or **Redeploy** in the UI).
+
 Set these environment variables:
 
 ```text
@@ -53,3 +60,18 @@ curl https://your-routerdone-domain.example/api/health
 ```
 
 Then sign in, add a provider, create a combo, and call `/v1/chat/completions`.
+
+## 404 troubleshooting
+
+If the public URL returns `404 page not found` (plain text, not the app's
+HTML 404):
+
+1. Open **Containers** and check the service state. A Traefik 404 with the
+   container running usually means the **Traefik router was not regenerated**
+   after a domain change — redeploy the compose.
+2. Confirm the **Domain** target is service `routerdone`, port `20128`, path
+   `/`, HTTPS on.
+3. Confirm the container is `healthy`, not just `running`. A container stuck
+   `unhealthy` can also lose its route. The compose healthcheck is tuned with
+   a 30s timeout and 90s start period so a large in-flight combo request does
+   not starve the health probe on a single-core container.

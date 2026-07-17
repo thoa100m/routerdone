@@ -6,12 +6,19 @@ services:
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
+    stop_grace_period: 30s
     environment:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       INITIAL_PASSWORD: ${INITIAL_PASSWORD:?set INITIAL_PASSWORD}
       DATA_DIR: ${DATA_DIR:-/app/data}
-      PORT: ${PORT:-20128}
-      HOSTNAME: ${HOSTNAME:-0.0.0.0}
+      # PORT/HOSTNAME are intentionally not interpolated from the host
+      # environment. Dokploy and `docker compose` can leak the host's PORT or
+      # HOSTNAME (e.g. a shell exporting HOSTNAME=container-name), which would
+      # start the process on a different port than the one exposed below and
+      # targeted by the Dokploy domain router, producing a 404 from Traefik
+      # while the container looks healthy on the wrong port. Pin them.
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
       NODE_ENV: ${NODE_ENV:-production}
       NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}
       BASE_URL: ${BASE_URL:?set BASE_URL}
@@ -33,9 +40,9 @@ services:
           "node -e \"fetch('http://127.0.0.1:20128/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
         ]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 90s
 
 volumes:
   routerdone-data:

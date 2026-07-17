@@ -47,8 +47,37 @@ if (result.status !== 0) {
   fail(`docker compose config failed${detail ? `: ${detail}` : '.'}`);
 }
 
-if (!/^  routerdone:\s*$/m.test(result.stdout)) {
+const rendered = result.stdout || '';
+
+if (!/^  routerdone:\s*$/m.test(rendered)) {
   fail('docker compose config did not produce services.routerdone.');
+}
+
+// Drift guards: these are the values the Dokploy domain router, the exposed
+// port and the healthcheck rely on. If any drifts, the public domain keeps
+// returning a Traefik 404 while `docker compose config` still parses fine,
+// so the parse-only check above is not enough.
+// docker compose config renders environment values double-quoted when they
+// look numeric or boolean, so allow optional quotes around each value.
+const expects = [
+  { label: 'PORT pinned to 20128', re: /PORT:\s*"?'?20128"?'?\s*$/m, source: 'rendered compose' },
+  { label: 'HOSTNAME pinned to 0.0.0.0', re: /HOSTNAME:\s*"?'?0\.0\.0\.0"?'?\s*$/m, source: 'rendered compose' },
+  { label: 'expose 20128', re: /^(\s*-\s*)?"'?20128"?'?\s*$/m, source: 'rendered compose' },
+  { label: 'healthcheck probes 127.0.0.1:20128', re: /127\.0\.0\.1:20128\/api\/health/, source: 'rendered compose' },
+  { label: 'stop_grace_period: 30s', re: /stop_grace_period:\s*"?30s"?/, source: 'docker-compose.dokploy.yml' },
+  { label: 'healthcheck timeout 30s', re: /timeout:\s*"?30s"?/, source: 'rendered compose' }
+];
+
+const errors = [];
+for (const e of expects) {
+  const haystack = e.source === 'docker-compose.dokploy.yml' ? text : rendered;
+  if (!e.re.test(haystack)) {
+    errors.push(`missing/invariant broken: ${e.label}`);
+  }
+}
+
+if (errors.length) {
+  fail(errors.join('; '));
 }
 
 console.log('Dokploy compose verify passed.');
