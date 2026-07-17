@@ -8,7 +8,6 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { normalizeResponsesInput, toOpenAIContentBlock } from "../formats/responsesApi.js";
 import { ROLE, OPENAI_BLOCK, RESPONSES_ITEM } from "../schema/index.js";
-import { isValidImageDataUri } from "../concerns/image.js";
 
 // Responses API enforces max 64 chars on call_id (#393)
 const MAX_CALL_ID_LEN = 64;
@@ -212,10 +211,9 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
           content: item.content.map((content) => {
             if (content?.type !== RESPONSES_ITEM.INPUT_IMAGE) return content;
             const url = typeof content.image_url === "string" ? content.image_url : content.image_url?.url;
-            const valid = typeof url === "string" && (url.startsWith("data:") ? isValidImageDataUri(url) : /^https?:\/\/\S+$/i.test(url));
-            return valid
+            return typeof url === "string" && url.length > 0
               ? { ...content, image_url: url }
-              : { type: RESPONSES_ITEM.INPUT_TEXT, text: "[image omitted: invalid image data]" };
+              : { type: RESPONSES_ITEM.INPUT_TEXT, text: "[image omitted: missing image reference]" };
           }),
         } : {}),
       }));
@@ -262,8 +260,8 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
             }
             if (c.type === RESPONSES_ITEM.INPUT_IMAGE) {
               const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
-              if (typeof url !== "string" || (url.startsWith("data:") ? !isValidImageDataUri(url) : !/^https?:\/\/\S+$/i.test(url))) {
-                return { type: contentType, text: "[image omitted: invalid image data]" };
+              if (typeof url !== "string" || url.length === 0) {
+                return { type: contentType, text: "[image omitted: missing image reference]" };
               }
               return { ...c, image_url: url };
             }

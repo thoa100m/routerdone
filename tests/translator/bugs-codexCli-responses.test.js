@@ -54,7 +54,7 @@ describe("Codex CLI Responses → OpenAI", () => {
 });
 
 describe("OpenAI → Codex Responses input normalization", () => {
-  it("normalizes object image_url and omits invalid image references in existing input", () => {
+  it("normalizes object image_url and omits missing image references in existing input", () => {
     const out = O2R({
       input: [{ type: "message", role: "user", content: [
         { type: "input_image", image_url: { url: "https://example.com/image.png", detail: "high" } },
@@ -63,7 +63,7 @@ describe("OpenAI → Codex Responses input normalization", () => {
     });
     expect(out.input[0].content).toEqual([
       { type: "input_image", image_url: "https://example.com/image.png" },
-      { type: "input_text", text: "[image omitted: invalid image data]" },
+      { type: "input_text", text: "[image omitted: missing image reference]" },
     ]);
   });
 });

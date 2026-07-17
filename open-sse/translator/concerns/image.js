@@ -90,11 +90,12 @@ export function isValidImageDataUri(value) {
   const parsed = parseDataUri(value);
   if (!parsed || !/^image\/[a-z0-9.+-]+$/i.test(parsed.mimeType)) return false;
   const payload = parsed.base64;
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload) || payload.length % 4 !== 0) return false;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return false;
+  const normalizedPayload = payload + "=".repeat((4 - (payload.length % 4)) % 4);
 
   let bytes;
   try {
-    bytes = Buffer.from(payload, "base64");
+    bytes = Buffer.from(normalizedPayload, "base64");
   } catch {
     return false;
   }

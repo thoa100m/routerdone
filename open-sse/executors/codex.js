@@ -171,9 +171,7 @@ export class CodexExecutor extends BaseExecutor {
         if (!url || typeof url !== "string") return { type: "input_text", text: "[image omitted: invalid image data]" };
         if (url.startsWith("data:")) return { type: "input_image", image_url: url, detail };
         const fetched = await fetchImageAsBase64(url, { timeoutMs: 15000 });
-        return fetched
-          ? { type: "input_image", image_url: fetched.url, detail }
-          : { type: "input_text", text: "[image omitted: image fetch failed]" };
+        return { type: "input_image", image_url: fetched?.url || url, detail };
       });
       item.content = await Promise.all(pending);
     }
