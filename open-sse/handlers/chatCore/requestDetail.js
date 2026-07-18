@@ -1,6 +1,17 @@
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { COLORS } from "../../utils/stream.js";
 
+// Verbose per-attempt usage line. Fires on every combo attempt (up to
+// models×retries per user request) and was a CPU/IO contributor on loaded
+// deploys. Quiet in production unless LOG_LEVEL=DEBUG|INFO or ENABLE_REQUEST_LOGS.
+const VERBOSE_LOGS = (() => {
+  const lvl = (process.env.LOG_LEVEL || "").toUpperCase();
+  if (lvl === "DEBUG" || lvl === "INFO") return true;
+  if (process.env.ENABLE_REQUEST_LOGS === "true") return true;
+  if (process.env.NODE_ENV === "production") return false;
+  return true;
+})();
+
 const OPTIONAL_PARAMS = [
   "temperature", "top_p", "top_k",
   "max_tokens", "max_completion_tokens",
@@ -87,7 +98,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
 
   const time = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
-  console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
+  if (VERBOSE_LOGS) console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
 
   // Normalize to OpenAI token shape for storage
   const normalized = {

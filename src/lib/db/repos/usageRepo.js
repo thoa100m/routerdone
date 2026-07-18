@@ -341,8 +341,14 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
     lastErrorProvider.ts = Date.now();
   }
 
-  const t = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  console.log(`[${t}] [PENDING] ${started ? "START" : "END"}${error ? " (ERROR)" : ""} | provider=${provider} | model=${model}`);
+  // Per-attempt PENDING log is verbose (fires on every combo retry attempt,
+  // up to models×retries per user request) and was a top CPU/IO contributor
+  // on loaded deploys. Gate behind ENABLE_REQUEST_LOGS so production stays
+  // quiet by default; enable explicitly when diagnosing routing.
+  if (process.env.ENABLE_REQUEST_LOGS === "true") {
+    const t = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    console.log(`[${t}] [PENDING] ${started ? "START" : "END"}${error ? " (ERROR)" : ""} | provider=${provider} | model=${model}`);
+  }
   statsEmitter.emit("pending");
 }
 
