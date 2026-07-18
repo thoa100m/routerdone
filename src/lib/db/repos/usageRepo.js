@@ -123,6 +123,21 @@ const connCache = global._connectionMapCache;
 
 export const statsEmitter = global._statsEmitter;
 
+export async function pruneUsageHistory({ olderThanMs = 7 * 86400000, batchSize = 500 } = {}) {
+  const db = await getAdapter();
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  let deleted = 0;
+  do {
+    const result = db.run(
+      `DELETE FROM usageHistory WHERE id IN (SELECT id FROM usageHistory WHERE timestamp < ? ORDER BY id ASC LIMIT ?)`,
+      [cutoff, Math.max(1, Math.min(2000, batchSize))]
+    );
+    deleted = result?.changes || 0;
+    if (deleted < Math.max(1, Math.min(2000, batchSize))) break;
+  } while (deleted > 0);
+  return deleted;
+}
+
 function getLocalDateKey(timestamp) {
   return getUsageDateKey(timestamp ? new Date(timestamp).getTime() : Date.now());
 }
