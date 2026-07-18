@@ -206,6 +206,16 @@ export function reorderByCapabilities(models, required) {
 const comboRotationState = new Map();
 const DEFAULT_COMBO_RETRY_ATTEMPTS = 0;
 const DEFAULT_COMBO_RETRY_DELAY_MS = 1000;
+// Bound retry amplification across the whole combo request. A saved combo can
+// still ask for per-model retries, but 15 models x 9 retries must not turn one
+// upstream outage into 135 attempts. Set 0 to disable the global cap.
+const DEFAULT_MAX_TRANSIENT_ATTEMPTS = 12;
+
+function getMaxTransientAttempts() {
+  const configured = Number.parseInt(process.env.COMBO_MAX_TRANSIENT_ATTEMPTS || "", 10);
+  if (Number.isFinite(configured) && configured >= 0) return configured;
+  return DEFAULT_MAX_TRANSIENT_ATTEMPTS;
+}
 
 // Trailing run of items after the last assistant/model turn = the current user
 // turn. It may span several messages (e.g. text + image split across blocks),
@@ -418,6 +428,8 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
   const policy = resolveRoutePolicy("combo", { retryAttempts: comboRetryAttempts, retryDelayMs: comboRetryDelayMs, streamPreflightTimeoutMs: comboPreflightTimeoutMs });
   const retryAttempts = normalizeRetryAttempts(policy.retry.attempts);
   const retryDelayMs = normalizeRetryDelayMs(policy.retry.delayMs);
+  const maxTransientAttempts = getMaxTransientAttempts();
+  let transientAttempts = 0;
   const totalDeadline = Date.now() + policy.stream.totalBudgetMs;
 
   rotatedModels = deprioritizeCoolingModels(rotatedModels, comboLogPrefix, log);
@@ -459,7 +471,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         const authLocked = isTransientComboStatus(result.status)
           ? await isAuthLockedComboResponse(result)
           : false;
-        if (result.ok || isImmediateFallbackStatus(result.status) || authLocked || !isTransientComboStatus(result.status) || attempt >= retryAttempts) {
+        if (result.ok || isImmediateFallbackStatus(result.status) || authLocked || !isTransientComboStatus(result.status) || attempt >= retryAttempts || (maxTransientAttempts > 0 && transientAttempts >= maxTransientAttempts)) {
           if (authLocked && attempt < retryAttempts) {
             log.info("COMBO", `${comboLogPrefix} | Model ${modelStr} auth/model locked, skip retry and try next model`);
           }
@@ -467,6 +479,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         }
 
         attempt++;
+        transientAttempts++;
         const remainingMs = totalDeadline - Date.now();
         if (remainingMs <= retryDelayMs + modelStreamPolicy.firstProductiveTimeoutMs) break;
         log.info("COMBO", `${comboLogPrefix} | Model ${modelStr} transient ${result.status}, retry ${attempt}/${retryAttempts} after ${retryDelayMs / 1000}s`);
