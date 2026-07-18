@@ -13,6 +13,7 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/sha
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 const DEFAULT_COMBO_RETRY_ATTEMPTS = 0;
 const DEFAULT_COMBO_RETRY_DELAY_MS = 1000;
+const COMBO_SAVE_TIMEOUT_MS = 15000;
 
 const COMBOS_CACHE_KEY = 'routerdone:combos-page';
 
@@ -97,40 +98,59 @@ export default function CombosPage() {
   };
 
   const handleCreate = async (data) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), COMBO_SAVE_TIMEOUT_MS);
     try {
       const res = await fetch("/api/combos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        signal: controller.signal,
       });
-      if (res.ok) {
-        await fetchData();
-        setShowCreateModal(false);
-      } else {
-        const err = await res.json();
-        alert(err.error || "Failed to create combo");
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(payload?.error || "Failed to create combo");
+        return;
       }
+
+      setCombos((current) => [...current, payload]);
+      setShowCreateModal(false);
+      fetchData().catch((error) => console.log("Error refreshing combo data:", error));
     } catch (error) {
       console.log("Error creating combo:", error);
+      alert(error?.name === "AbortError" ? "Saving combo timed out" : "Failed to create combo");
+    } finally {
+      clearTimeout(timeout);
     }
   };
 
   const handleUpdate = async (id, data) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), COMBO_SAVE_TIMEOUT_MS);
     try {
       const res = await fetch(`/api/combos/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        signal: controller.signal,
       });
-      if (res.ok) {
-        await fetchData();
-        setEditingCombo(null);
-      } else {
-        const err = await res.json();
-        alert(err.error || "Failed to update combo");
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(payload?.error || "Failed to update combo");
+        return;
       }
+
+      // Apply the saved row and close immediately. The old flow awaited all
+      // four dashboard refresh requests here, so a slow /api/models request
+      // made a successful Save look stuck and left the modal open.
+      setCombos((current) => current.map((combo) => combo.id === id ? { ...combo, ...payload } : combo));
+      setEditingCombo(null);
+      fetchData().catch((error) => console.log("Error refreshing combo data:", error));
     } catch (error) {
       console.log("Error updating combo:", error);
+      alert(error?.name === "AbortError" ? "Saving combo timed out" : "Failed to update combo");
+    } finally {
+      clearTimeout(timeout);
     }
   };
 
