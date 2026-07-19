@@ -30,7 +30,7 @@ describe("adaptive combo fallback", () => {
     expect(tried).toEqual(["p/a", "p/b"]);
   });
 
-  it("retries transient 503 according to config, then falls back", async () => {
+  it("locks a transient 503 model, then falls back without retrying it", async () => {
     const tried = [];
     const res = await handleComboChat({
       body: { model: "combo", messages: [] },
@@ -46,7 +46,7 @@ describe("adaptive combo fallback", () => {
       },
     });
     expect(res.ok).toBe(true);
-    expect(tried).toEqual(["p/a", "p/a", "p/b"]);
+    expect(tried).toEqual(["p/a", "p/b"]);
   });
 
   it("does not retry a transient response that says all accounts are model-locked", async () => {
@@ -252,6 +252,33 @@ describe("adaptive combo fallback", () => {
     expect(sCap.remainingMs).toBeLessThanOrEqual(30 * 60_000);
   });
 
+  it("keeps the failure count after cooldown expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      const fail = () => new Response(JSON.stringify({ error: { message: "bad gateway" } }), { status: 502 });
+      const run = () => handleComboChat({
+        body: { model: "combo", messages: [] },
+        models: ["p/a"],
+        comboName: "combo",
+        comboRetryAttempts: 0,
+        comboRetryDelayMs: 0,
+        log,
+        handleSingleModel: fail,
+      });
+
+      await run();
+      expect(getComboCooldownState("p/a").failureCount).toBe(1);
+      vi.advanceTimersByTime(30_001);
+      await run();
+      const state = getComboCooldownState("p/a");
+      expect(state.failureCount).toBe(2);
+      expect(state.remainingMs).toBeGreaterThan(50_000);
+      expect(state.remainingMs).toBeLessThanOrEqual(60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("resets the cooldown counter to base after one successful call", async () => {
     const preflightFail = async () => new Response(
       JSON.stringify({ error: { message: "upstream first productive timeout" } }),
@@ -283,7 +310,7 @@ describe("adaptive combo fallback", () => {
     expect(after.remainingMs).toBeGreaterThan(25_000);
     expect(after.remainingMs).toBeLessThanOrEqual(30_000);
   });
-  it("resets stale combo backoff after the cooldown window expires", async () => {
+  it("keeps combo backoff after the cooldown window expires", async () => {
     vi.useFakeTimers();
     try {
       const preflightFail = async () => new Response(
@@ -308,9 +335,9 @@ describe("adaptive combo fallback", () => {
       vi.advanceTimersByTime(61_000);
       await arm();
       const after = getComboCooldownState("p/a");
-      expect(after.failureCount).toBe(1);
-      expect(after.remainingMs).toBeGreaterThan(25_000);
-      expect(after.remainingMs).toBeLessThanOrEqual(30_000);
+      expect(after.failureCount).toBe(3);
+      expect(after.remainingMs).toBeGreaterThan(100_000);
+      expect(after.remainingMs).toBeLessThanOrEqual(120_000);
     } finally {
       vi.useRealTimers();
     }
