@@ -85,7 +85,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const provider = normalizeProviderId(body.provider);
-    const { apiKey, providerSpecificData } = body;
+    const { apiKey, defaultModel, providerSpecificData } = body;
 
     const isNoAuth = AI_PROVIDERS[provider]?.noAuth === true;
     if (!provider || (!apiKey && provider !== "ollama-local" && !isNoAuth)) {
@@ -102,13 +102,53 @@ export async function POST(request) {
         if (!node) {
           return NextResponse.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
         }
-        const modelsUrl = `${node.baseUrl?.replace(/\/$/, "")}/models`;
-        const res = await fetch(modelsUrl, {
-          headers: { "Authorization": `Bearer ${apiKey}` },
-        });
-        isValid = res.ok;
+        const baseUrl = node.baseUrl?.replace(/\/$/, "");
+        const modelsUrl = `${baseUrl}/models`;
+        let modelsRes = null;
+        try {
+          modelsRes = await fetch(modelsUrl, {
+            headers: { "Authorization": `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(8000),
+          });
+        } catch {
+          // Some compatible gateways serve inference but stall or omit /models.
+        }
+
+        if (modelsRes?.ok) {
+          return NextResponse.json({ valid: true, method: "models" });
+        }
+        if (modelsRes?.status === 401 || modelsRes?.status === 403) {
+          return NextResponse.json({ valid: false, error: "Invalid API key" });
+        }
+
+        const model = defaultModel?.trim() || node.defaultModel?.trim();
+        if (!model) {
+          return NextResponse.json({ valid: false, error: "/models unavailable - enter a Default Model for inference validation" });
+        }
+
+        let chatRes;
+        try {
+          chatRes = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "user", content: "ping" }],
+              max_tokens: 1,
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+        } catch (error) {
+          return NextResponse.json({ valid: false, error: error?.name === "TimeoutError" ? "Provider inference request timed out" : "Provider inference request failed" });
+        }
+
+        isValid = chatRes.status !== 401 && chatRes.status !== 403;
         return NextResponse.json({
           valid: isValid,
+          method: "chat",
           error: isValid ? null : "Invalid API key",
         });
       }

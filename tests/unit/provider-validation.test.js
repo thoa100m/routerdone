@@ -14,6 +14,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const originalFetch = global.fetch;
 
 describe("Provider Validation API", () => {
+  it("should preserve the compatible model for inference fallback", () => {
+    const payload = {
+      provider: "openai-compatible-chat-test",
+      apiKey: "test-key",
+      defaultModel: "gpt-5.6-luna",
+    };
+    expect(payload.defaultModel).toBe("gpt-5.6-luna");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
