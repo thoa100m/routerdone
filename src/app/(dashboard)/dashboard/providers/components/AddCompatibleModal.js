@@ -51,17 +51,18 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
 
-  // openai: reset baseUrl when apiType changes; anthropic: reset checks when opened
+  const isAnthropicVariant = variant === "anthropic";
+
+  // Reset transient check fields when the Anthropic modal opens.
   useEffect(() => {
-    if (config.hasApiType) {
-      setFormData((prev) => ({ ...prev, baseUrl: config.defaultBaseUrl }));
-    } else if (isOpen) {
+    if (!isAnthropicVariant || !isOpen) return undefined;
+    const resetTimer = window.setTimeout(() => {
       setValidationResult(null);
       setCheckKey("");
       setCheckModelId("");
-    }
-  }, [config.hasApiType ? formData.apiType : isOpen]);
-
+    }, 0);
+    return () => window.clearTimeout(resetTimer);
+  }, [isAnthropicVariant, isOpen]);
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
     setSubmitting(true);
@@ -156,7 +157,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
             label={translate("API Type")}
             options={API_TYPE_OPTIONS.map(o => ({ ...o, label: translate(o.label) }))}
             value={formData.apiType}
-            onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
+            onChange={(e) => setFormData((prev) => ({ ...prev, apiType: e.target.value, baseUrl: config.defaultBaseUrl }))}
           />
         )}
         <Input
@@ -173,16 +174,16 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           onChange={(e) => setCheckKey(e.target.value)}
         />
         <Input
-          label={translate("Model ID (optional)")}
+          label={translate("Model ID")}
           value={checkModelId}
           onChange={(e) => setCheckModelId(e.target.value)}
           placeholder={config.modelIdPlaceholder}
-          hint={translate("If provider lacks /models endpoint, enter a model ID to validate via chat/completions instead.")}
+          hint={translate("Optional when /models responds. Required to validate through chat/completions when /models is unavailable.")}
         />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <Button
             onClick={handleValidate}
-            disabled={!checkKey || validating || !formData.baseUrl.trim()}
+            disabled={!checkKey || validating || !formData.baseUrl.trim() || (config.type === "openai-compatible" && !checkModelId.trim())}
             variant="secondary"
             className="w-full sm:w-auto"
           >

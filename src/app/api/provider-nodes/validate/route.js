@@ -3,16 +3,23 @@ import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
 import { buildProviderEndpoint, normalizeProviderBaseUrl, normalizeRuntimeProfile } from "@/lib/providerTransport";
 
-// Abort the upstream request when validation times out.
-const fetchWithTimeout = (url, options, timeout = 10000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  return fetch(url, { ...options, signal: controller.signal })
-    .catch((error) => {
-      if (error?.name === "AbortError") throw new Error("Request timeout");
-      throw error;
-    })
-    .finally(() => clearTimeout(timer));
+// Abort and retry transient upstream validation failures. A provider can serve
+// inference while its catalog endpoint is temporarily slow or unavailable.
+const fetchWithTimeout = async (url, options, timeout = 15000, retries = 1) => {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      lastError = error?.name === "AbortError" ? new Error("Request timeout") : error;
+      if (attempt === retries) throw lastError;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
 };
 
 const isRequestTimeout = (error) => error?.message === "Request timeout";
