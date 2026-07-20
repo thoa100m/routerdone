@@ -72,6 +72,35 @@ describe("Provider Validation API", () => {
       expect(chatRes.ok).toBe(true);
     });
 
+    it("should fallback to chat/completions when /models times out", async () => {
+      const modelsCall = vi.fn().mockRejectedValue(new Error("Request timeout"));
+      const chatCall = vi.fn().mockResolvedValue({ ok: true });
+
+      global.fetch = vi.fn().mockImplementation((url) => {
+        if (url.includes("/models")) return modelsCall();
+        if (url.includes("/chat/completions")) return chatCall();
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      let modelsTimedOut = false;
+      try {
+        await fetch("https://custom-provider.com/v1/models");
+      } catch (error) {
+        modelsTimedOut = error.message === "Request timeout";
+      }
+      expect(modelsTimedOut).toBe(true);
+
+      const chatRes = await fetch("https://custom-provider.com/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "gpt-5.6-terra",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        }),
+      });
+      expect(chatRes.ok).toBe(true);
+      expect(chatCall).toHaveBeenCalledOnce();
+    });
     it("should return error when /models fails and no modelId", async () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
 

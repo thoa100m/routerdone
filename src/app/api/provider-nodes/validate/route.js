@@ -3,16 +3,19 @@ import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
 import { buildProviderEndpoint, normalizeProviderBaseUrl, normalizeRuntimeProfile } from "@/lib/providerTransport";
 
-// Fetch with timeout wrapper
+// Abort the upstream request when validation times out.
 const fetchWithTimeout = (url, options, timeout = 10000) => {
-  return Promise.race([
-    fetch(url, options),
-    new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Request timeout")), timeout)
-    )
-  ]);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...options, signal: controller.signal })
+    .catch((error) => {
+      if (error?.name === "AbortError") throw new Error("Request timeout");
+      throw error;
+    })
+    .finally(() => clearTimeout(timer));
 };
 
+const isRequestTimeout = (error) => error?.message === "Request timeout";
 // Validate URL format
 const isValidUrl = (url) => {
   try {
@@ -42,6 +45,9 @@ const getModelsErrorMessage = (status) => {
   if (status >= 500) return "Server error - try again later";
   return `Unexpected response (${status})`;
 };
+
+const getModelsTimeoutMessage = () =>
+  "/models request timed out - enter a Model ID to validate via chat/completions";
 
 // Get status-specific error message for /chat/completions endpoint
 const getChatErrorMessage = (status) => {
@@ -111,19 +117,23 @@ export async function POST(request) {
     // Anthropic Compatible Validation
     if (type === "anthropic-compatible") {
       const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { transport: "anthropic" });
-      const res = await fetchWithTimeout(modelsUrl, {
-        method: "GET",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "Authorization": `Bearer ${apiKey}`
-        }
-      });
+      let res;
+      try {
+        res = await fetchWithTimeout(modelsUrl, {
+          method: "GET",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Authorization": `Bearer ${apiKey}`
+          }
+        });
+      } catch (error) {
+        if (!modelId || !isRequestTimeout(error)) throw error;
+      }
 
-      if (res.ok) return NextResponse.json({ valid: true });
-
+      if (res?.ok) return NextResponse.json({ valid: true });
       // Auth errors - no point trying chat fallback
-      if (res.status === 401 || res.status === 403) {
+      if (res?.status === 401 || res?.status === 403) {
         return NextResponse.json({ valid: false, error: "API key unauthorized" });
       }
 
@@ -153,19 +163,23 @@ export async function POST(request) {
         });
       }
 
-      return NextResponse.json({ valid: false, error: getModelsErrorMessage(res.status) });
+      return NextResponse.json({ valid: false, error: res ? getModelsErrorMessage(res.status) : getModelsTimeoutMessage() });
     }
 
     // OpenAI Compatible Validation (Default)
     const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { runtimeProfile });
-    const res = await fetchWithTimeout(modelsUrl, {
-      headers: { "Authorization": `Bearer ${apiKey}` },
-    });
-
-    if (res.ok) return NextResponse.json({ valid: true });
+    let res;
+    try {
+      res = await fetchWithTimeout(modelsUrl, {
+        headers: { "Authorization": `Bearer ${apiKey}` },
+      });
+    } catch (error) {
+      if (!modelId || !isRequestTimeout(error)) throw error;
+    }
+    if (res?.ok) return NextResponse.json({ valid: true });
 
     // Auth errors - no point trying chat fallback
-    if (res.status === 401 || res.status === 403) {
+    if (res?.status === 401 || res?.status === 403) {
       return NextResponse.json({ valid: false, error: "API key unauthorized" });
     }
 
@@ -193,7 +207,7 @@ export async function POST(request) {
       });
     }
 
-    return NextResponse.json({ valid: false, error: getModelsErrorMessage(res.status) });
+    return NextResponse.json({ valid: false, error: res ? getModelsErrorMessage(res.status) : getModelsTimeoutMessage() });
   } catch (error) {
     const errorMessage = getErrorMessage(error);
     console.error("Error validating provider node:", {
