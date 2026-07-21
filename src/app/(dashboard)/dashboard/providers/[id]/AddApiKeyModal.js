@@ -41,6 +41,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const [region, setRegion] = useState(defaultRegion);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [validationError, setValidationError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState("single"); // "single" | "bulk"
   const [bulkText, setBulkText] = useState("");
@@ -69,6 +70,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
 
   const handleValidate = async () => {
     setValidating(true);
+    setValidationError(null);
     try {
       const res = await fetch("/api/providers/validate", {
         method: "POST",
@@ -77,8 +79,10 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
       });
       const data = await res.json();
       setValidationResult(data.valid ? "success" : "failed");
-    } catch {
+      setValidationError(data.valid ? null : (data.error || translate("Validation failed")));
+    } catch (validationError) {
       setValidationResult("failed");
+      setValidationError(validationError?.message || translate("Network error"));
     } finally {
       setValidating(false);
     }
@@ -99,6 +103,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
       try {
         setValidating(true);
         setValidationResult(null);
+        setValidationError(null);
         const res = await fetch("/api/providers/validate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -107,8 +112,10 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         const data = await res.json();
         isValid = !!data.valid;
         setValidationResult(isValid ? "success" : "failed");
-      } catch {
+        setValidationError(isValid ? null : (data.error || translate("Validation failed")));
+      } catch (validationError) {
         setValidationResult("failed");
+        setValidationError(validationError?.message || translate("Network error"));
       } finally {
         setValidating(false);
       }
@@ -270,9 +277,14 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </p>
         )}
         {validationResult && (
-          <Badge variant={validationResult === "success" ? "success" : "error"}>
-            {validationResult === "success" ? translate("Valid") : translate("Invalid")}
-          </Badge>
+          <div className="flex flex-col gap-1">
+            <Badge variant={validationResult === "success" ? "success" : "error"}>
+              {validationResult === "success" ? translate("Valid") : translate("Invalid")}
+            </Badge>
+            {validationError && validationResult !== "success" && (
+              <span className="text-sm text-red-500 break-words">{validationError}</span>
+            )}
+          </div>
         )}
         {error && (
           <p className="text-xs text-red-500 break-words">{error}</p>

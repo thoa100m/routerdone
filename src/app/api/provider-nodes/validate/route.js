@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { fetchDirectWithTimeout } from "@/lib/network/validationFetch";
+import { fetchValidationWithTimeout } from "@/lib/network/validationFetch";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
 import { buildProviderEndpoint, normalizeProviderBaseUrl, normalizeRuntimeProfile } from "@/lib/providerTransport";
+import { ensureOutboundProxyInitialized } from "@/lib/network/initOutboundProxy";
 
 const isRequestTimeout = (error) => error?.message === "Request timeout";
 // Validate URL format
@@ -51,6 +52,7 @@ const getChatErrorMessage = (status) => {
 // POST /api/provider-nodes/validate - Validate API key against base URL
 export async function POST(request) {
   try {
+    await ensureOutboundProxyInitialized();
     const body = await request.json();
     const { baseUrl, apiKey, type, modelId, apiType = "chat" } = body;
     const runtimeProfile = normalizeRuntimeProfile(body.runtimeProfile);
@@ -80,7 +82,7 @@ export async function POST(request) {
       if (!modelId?.trim()) {
         return NextResponse.json({ valid: false, error: "Model ID required for embedding validation" });
       }
-      const embedRes = await fetchDirectWithTimeout(buildProviderEndpoint(normalizedBase, "/embeddings", { runtimeProfile }), {
+      const embedRes = await fetchValidationWithTimeout(buildProviderEndpoint(normalizedBase, "/embeddings", { runtimeProfile }), {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -109,7 +111,7 @@ export async function POST(request) {
       const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { transport: "anthropic" });
       let res;
       try {
-        res = await fetchDirectWithTimeout(modelsUrl, {
+        res = await fetchValidationWithTimeout(modelsUrl, {
           method: "GET",
           headers: {
             "x-api-key": apiKey,
@@ -129,7 +131,7 @@ export async function POST(request) {
 
       // Fallback: try chat/completions if modelId provided
       if (modelId) {
-        const chatRes = await fetchDirectWithTimeout(buildProviderEndpoint(normalizedBase, "/chat/completions", { transport: "anthropic" }), {
+        const chatRes = await fetchValidationWithTimeout(buildProviderEndpoint(normalizedBase, "/chat/completions", { transport: "anthropic" }), {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -169,7 +171,7 @@ export async function POST(request) {
 
     if (model) {
       try {
-        const inferenceRes = await fetchDirectWithTimeout(
+        const inferenceRes = await fetchValidationWithTimeout(
           buildProviderEndpoint(normalizedBase, inferencePath, { runtimeProfile }),
           {
             method: "POST",
@@ -206,7 +208,7 @@ export async function POST(request) {
     const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { runtimeProfile });
     let res;
     try {
-      res = await fetchDirectWithTimeout(modelsUrl, {
+      res = await fetchValidationWithTimeout(modelsUrl, {
         headers: { "Authorization": `Bearer ${apiKey}` },
       });
     } catch (error) {

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getProviderNodeById } from "@/models";
-import { fetchDirectWithTimeout } from "@/lib/network/validationFetch";
+import { fetchValidationWithTimeout } from "@/lib/network/validationFetch";
 import { buildProviderEndpoint, normalizeProviderBaseUrl } from "@/lib/providerTransport";
+import { ensureOutboundProxyInitialized } from "@/lib/network/initOutboundProxy";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
@@ -85,6 +86,7 @@ async function probeMediaProvider(provider, apiKey) {
 // POST /api/providers/validate - Validate API key with provider
 export async function POST(request) {
   try {
+    await ensureOutboundProxyInitialized();
     const body = await request.json();
     const provider = normalizeProviderId(body.provider);
     const { apiKey, defaultModel, providerSpecificData } = body;
@@ -113,7 +115,7 @@ export async function POST(request) {
           const method = usesResponsesApi ? "responses" : "chat";
           const path = usesResponsesApi ? "/responses" : "/chat/completions";
           try {
-            const inferenceRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, path), {
+            const inferenceRes = await fetchValidationWithTimeout(buildProviderEndpoint(baseUrl, path), {
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${apiKey}`,
@@ -124,10 +126,17 @@ export async function POST(request) {
                 : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
             }, 30000);
 
+            if (inferenceRes.ok) {
+              return NextResponse.json({ valid: true, method, error: null });
+            }
             if (inferenceRes.status === 401 || inferenceRes.status === 403) {
               return NextResponse.json({ valid: false, method, error: "Invalid API key" });
             }
-            return NextResponse.json({ valid: true, method, error: null });
+            return NextResponse.json({
+              valid: false,
+              method,
+              error: `Provider inference request failed (${inferenceRes.status})`,
+            });
           } catch (error) {
             return NextResponse.json({
               valid: false,
@@ -138,7 +147,7 @@ export async function POST(request) {
         }
 
         try {
-          const modelsRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, "/models"), {
+          const modelsRes = await fetchValidationWithTimeout(buildProviderEndpoint(baseUrl, "/models"), {
             headers: { "Authorization": `Bearer ${apiKey}` },
           });
           if (modelsRes.ok) return NextResponse.json({ valid: true, method: "models", error: null });
