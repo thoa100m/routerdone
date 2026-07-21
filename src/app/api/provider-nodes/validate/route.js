@@ -1,27 +1,8 @@
 import { NextResponse } from "next/server";
-import { fetch as directFetch } from "undici";
+import { fetchDirectWithTimeout } from "@/lib/network/validationFetch";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
 import { buildProviderEndpoint, normalizeProviderBaseUrl, normalizeRuntimeProfile } from "@/lib/providerTransport";
-
-// Abort and retry transient upstream validation failures. A provider can serve
-// inference while its catalog endpoint is temporarily slow or unavailable.
-const fetchWithTimeout = async (url, options, timeout = 15000, retries = 1) => {
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    try {
-      return await directFetch(url, { ...options, signal: controller.signal });
-    } catch (error) {
-      lastError = error?.name === "AbortError" ? new Error("Request timeout") : error;
-      if (attempt === retries) throw lastError;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw lastError;
-};
 
 const isRequestTimeout = (error) => error?.message === "Request timeout";
 // Validate URL format
@@ -99,7 +80,7 @@ export async function POST(request) {
       if (!modelId?.trim()) {
         return NextResponse.json({ valid: false, error: "Model ID required for embedding validation" });
       }
-      const embedRes = await fetchWithTimeout(buildProviderEndpoint(normalizedBase, "/embeddings", { runtimeProfile }), {
+      const embedRes = await fetchDirectWithTimeout(buildProviderEndpoint(normalizedBase, "/embeddings", { runtimeProfile }), {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
@@ -128,7 +109,7 @@ export async function POST(request) {
       const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { transport: "anthropic" });
       let res;
       try {
-        res = await fetchWithTimeout(modelsUrl, {
+        res = await fetchDirectWithTimeout(modelsUrl, {
           method: "GET",
           headers: {
             "x-api-key": apiKey,
@@ -148,7 +129,7 @@ export async function POST(request) {
 
       // Fallback: try chat/completions if modelId provided
       if (modelId) {
-        const chatRes = await fetchWithTimeout(buildProviderEndpoint(normalizedBase, "/chat/completions", { transport: "anthropic" }), {
+        const chatRes = await fetchDirectWithTimeout(buildProviderEndpoint(normalizedBase, "/chat/completions", { transport: "anthropic" }), {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -188,7 +169,7 @@ export async function POST(request) {
 
     if (model) {
       try {
-        const inferenceRes = await fetchWithTimeout(
+        const inferenceRes = await fetchDirectWithTimeout(
           buildProviderEndpoint(normalizedBase, inferencePath, { runtimeProfile }),
           {
             method: "POST",
@@ -225,7 +206,7 @@ export async function POST(request) {
     const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { runtimeProfile });
     let res;
     try {
-      res = await fetchWithTimeout(modelsUrl, {
+      res = await fetchDirectWithTimeout(modelsUrl, {
         headers: { "Authorization": `Bearer ${apiKey}` },
       });
     } catch (error) {

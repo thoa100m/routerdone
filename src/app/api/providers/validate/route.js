@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderNodeById } from "@/models";
+import { fetchDirectWithTimeout } from "@/lib/network/validationFetch";
+import { buildProviderEndpoint, normalizeProviderBaseUrl } from "@/lib/providerTransport";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
@@ -102,55 +104,55 @@ export async function POST(request) {
         if (!node) {
           return NextResponse.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
         }
-        const baseUrl = (providerSpecificData?.baseUrl?.trim() || node.baseUrl)?.replace(/\/$/, "");
-        const modelsUrl = `${baseUrl}/models`;
-        let modelsRes = null;
-        try {
-          modelsRes = await fetch(modelsUrl, {
-            headers: { "Authorization": `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(8000),
-          });
-        } catch {
-          // Some compatible gateways serve inference but stall or omit /models.
-        }
 
-        if (modelsRes?.ok) {
-          return NextResponse.json({ valid: true, method: "models" });
-        }
-        if (modelsRes?.status === 401 || modelsRes?.status === 403) {
-          return NextResponse.json({ valid: false, error: "Invalid API key" });
-        }
-
+        const baseUrl = normalizeProviderBaseUrl(providerSpecificData?.baseUrl?.trim() || node.baseUrl);
         const model = defaultModel?.trim() || node.defaultModel?.trim();
-        if (!model) {
-          return NextResponse.json({ valid: false, error: "/models unavailable - enter a Default Model for inference validation" });
-        }
-
         const usesResponsesApi = node.apiType === "responses";
-        const inferenceUrl = usesResponsesApi ? `${baseUrl}/responses` : `${baseUrl}/chat/completions`;
-        let chatRes;
-        try {
-          chatRes = await fetch(inferenceUrl, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(usesResponsesApi
-              ? { model, input: "ping", max_output_tokens: 1 }
-              : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
-            signal: AbortSignal.timeout(30000),
-          });
-        } catch (error) {
-          return NextResponse.json({ valid: false, error: error?.name === "TimeoutError" ? "Provider inference request timed out" : "Provider inference request failed" });
+
+        if (model) {
+          const method = usesResponsesApi ? "responses" : "chat";
+          const path = usesResponsesApi ? "/responses" : "/chat/completions";
+          try {
+            const inferenceRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, path), {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(usesResponsesApi
+                ? { model, input: "ping", max_output_tokens: 1 }
+                : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+            }, 30000);
+
+            if (inferenceRes.status === 401 || inferenceRes.status === 403) {
+              return NextResponse.json({ valid: false, method, error: "Invalid API key" });
+            }
+            return NextResponse.json({ valid: true, method, error: null });
+          } catch (error) {
+            return NextResponse.json({
+              valid: false,
+              method,
+              error: error?.message === "Request timeout" ? "Provider inference request timed out" : "Provider inference request failed",
+            });
+          }
         }
 
-        isValid = chatRes.status !== 401 && chatRes.status !== 403;
-        return NextResponse.json({
-          valid: isValid,
-          method: usesResponsesApi ? "responses" : "chat",
-          error: isValid ? null : "Invalid API key",
-        });
+        try {
+          const modelsRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, "/models"), {
+            headers: { "Authorization": `Bearer ${apiKey}` },
+          });
+          if (modelsRes.ok) return NextResponse.json({ valid: true, method: "models", error: null });
+          if (modelsRes.status === 401 || modelsRes.status === 403) {
+            return NextResponse.json({ valid: false, method: "models", error: "Invalid API key" });
+          }
+          return NextResponse.json({ valid: false, method: "models", error: "/models request failed - enter a Default Model for inference validation" });
+        } catch (error) {
+          return NextResponse.json({
+            valid: false,
+            method: "models",
+            error: error?.message === "Request timeout" ? "Provider models request timed out" : "Provider models request failed",
+          });
+        }
       }
 
       // Custom Embedding nodes: probe /models (most embedding APIs are OpenAI-compatible)

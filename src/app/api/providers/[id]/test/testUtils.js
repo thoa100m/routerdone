@@ -1,5 +1,7 @@
 ﻿import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
+import { fetchDirectWithTimeout } from "@/lib/network/validationFetch";
+import { buildProviderEndpoint, normalizeProviderBaseUrl } from "@/lib/providerTransport";
 import { testProxyUrl } from "@/lib/network/proxyTest";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
@@ -339,45 +341,36 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
   if (isOpenAICompatibleProvider(connection.provider)) {
     const modelsBase = connection.providerSpecificData?.baseUrl;
     if (!modelsBase) return { valid: false, error: "Missing base URL" };
-    const baseUrl = modelsBase.replace(/\/$/, "");
+
     try {
-      let modelsRes = null;
-      try {
-        modelsRes = await fetchWithConnectionProxy(`${baseUrl}/models`, {
-          headers: { "Authorization": `Bearer ${connection.apiKey}` },
-          signal: AbortSignal.timeout(8000),
-        }, effectiveProxy);
-      } catch {
-        // Some compatible gateways serve inference but stall or omit /models.
-      }
-
-      if (modelsRes?.ok) return { valid: true, error: null, method: "models" };
-      if (modelsRes?.status === 401 || modelsRes?.status === 403) {
-        return { valid: false, error: "Invalid API key or base URL" };
-      }
-
+      const baseUrl = normalizeProviderBaseUrl(modelsBase);
       const model = connection.defaultModel?.trim();
-      if (!model) {
-        return { valid: false, error: "/models unavailable; Default Model is required for inference test" };
+      const usesResponsesApi = connection.providerSpecificData?.apiType === "responses";
+
+      if (model) {
+        const method = usesResponsesApi ? "responses" : "chat";
+        const path = usesResponsesApi ? "/responses" : "/chat/completions";
+        const inferenceRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, path), {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${connection.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(usesResponsesApi
+            ? { model, input: "ping", max_output_tokens: 1 }
+            : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+        }, 30000);
+        const valid = inferenceRes.status !== 401 && inferenceRes.status !== 403;
+        return { valid, error: valid ? null : "Invalid API key or base URL", method };
       }
 
-      const chatRes = await fetchWithConnectionProxy(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${connection.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 1,
-        }),
-        signal: AbortSignal.timeout(15000),
-      }, effectiveProxy);
-      const valid = chatRes.status !== 401 && chatRes.status !== 403;
-      return { valid, error: valid ? null : "Invalid API key or base URL", method: "chat" };
+      const modelsRes = await fetchDirectWithTimeout(buildProviderEndpoint(baseUrl, "/models"), {
+        headers: { "Authorization": `Bearer ${connection.apiKey}` },
+      });
+      const valid = modelsRes.ok;
+      return { valid, error: valid ? null : "Invalid API key or base URL", method: "models" };
     } catch (err) {
-      return { valid: false, error: err?.name === "TimeoutError" ? "Provider inference request timed out" : err.message };
+      return { valid: false, error: err?.message === "Request timeout" ? "Provider validation request timed out" : err.message };
     }
   }
 
