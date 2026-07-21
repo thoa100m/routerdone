@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetch as directFetch } from "undici";
 import { assertPublicUrl } from "@/shared/utils/ssrfGuard.js";
 import { isLocalRequest } from "@/dashboardGuard";
 import { buildProviderEndpoint, normalizeProviderBaseUrl, normalizeRuntimeProfile } from "@/lib/providerTransport";
@@ -11,7 +12,7 @@ const fetchWithTimeout = async (url, options, timeout = 15000, retries = 1) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      return await directFetch(url, { ...options, signal: controller.signal });
     } catch (error) {
       lastError = error?.name === "AbortError" ? new Error("Request timeout") : error;
       if (attempt === retries) throw lastError;
