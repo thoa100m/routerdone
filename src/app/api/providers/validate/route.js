@@ -102,7 +102,7 @@ export async function POST(request) {
         if (!node) {
           return NextResponse.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
         }
-        const baseUrl = node.baseUrl?.replace(/\/$/, "");
+        const baseUrl = (providerSpecificData?.baseUrl?.trim() || node.baseUrl)?.replace(/\/$/, "");
         const modelsUrl = `${baseUrl}/models`;
         let modelsRes = null;
         try {
@@ -126,20 +126,20 @@ export async function POST(request) {
           return NextResponse.json({ valid: false, error: "/models unavailable - enter a Default Model for inference validation" });
         }
 
+        const usesResponsesApi = node.apiType === "responses";
+        const inferenceUrl = usesResponsesApi ? `${baseUrl}/responses` : `${baseUrl}/chat/completions`;
         let chatRes;
         try {
-          chatRes = await fetch(`${baseUrl}/chat/completions`, {
+          chatRes = await fetch(inferenceUrl, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${apiKey}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              model,
-              messages: [{ role: "user", content: "ping" }],
-              max_tokens: 1,
-            }),
-            signal: AbortSignal.timeout(15000),
+            body: JSON.stringify(usesResponsesApi
+              ? { model, input: "ping", max_output_tokens: 1 }
+              : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+            signal: AbortSignal.timeout(30000),
           });
         } catch (error) {
           return NextResponse.json({ valid: false, error: error?.name === "TimeoutError" ? "Provider inference request timed out" : "Provider inference request failed" });
@@ -148,7 +148,7 @@ export async function POST(request) {
         isValid = chatRes.status !== 401 && chatRes.status !== 403;
         return NextResponse.json({
           valid: isValid,
-          method: "chat",
+          method: usesResponsesApi ? "responses" : "chat",
           error: isValid ? null : "Invalid API key",
         });
       }

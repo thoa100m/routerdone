@@ -103,6 +103,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           apiKey: checkKey,
           type: config.type,
           modelId: checkModelId.trim() || undefined,
+          apiType: formData.apiType,
         }),
       });
       const data = await res.json();

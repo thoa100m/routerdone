@@ -31,6 +31,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const [testResult, setTestResult] = useState(null);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [validationError, setValidationError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -60,6 +61,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       }
       setTestResult(null);
       setValidationResult(null);
+      setValidationError(null);
     }
   }, [connection]);
 
@@ -85,25 +87,40 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     }
   };
 
+  const buildValidationProviderSpecificData = () => {
+    if (isCompatible) {
+      return {
+        baseUrl: formData.baseUrl.trim(),
+        runtimeProfile: formData.runtimeProfile,
+      };
+    }
+    if (isAzure) return azureData;
+    if (isCloudflareAi) return cloudflareData;
+    return undefined;
+  };
+  const buildValidationPayload = () => ({
+    provider: connection.provider,
+    apiKey: formData.apiKey,
+    defaultModel: isCompatible ? connection.defaultModel?.trim() : undefined,
+    providerSpecificData: buildValidationProviderSpecificData(),
+  });
   const handleValidate = async () => {
     if (!connection?.provider || !formData.apiKey) return;
     setValidating(true);
     setValidationResult(null);
+    setValidationError(null);
     try {
       const res = await fetch("/api/providers/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: connection.provider,
-          apiKey: formData.apiKey,
-          ...(isAzure ? { providerSpecificData: azureData } : {}),
-          ...(isCloudflareAi ? { providerSpecificData: cloudflareData } : {}),
-        }),
+        body: JSON.stringify(buildValidationPayload()),
       });
       const data = await res.json();
       setValidationResult(data.valid ? "success" : "failed");
-    } catch {
+      setValidationError(data.valid ? null : (data.error || "Validation failed"));
+    } catch (error) {
       setValidationResult("failed");
+      setValidationError(error?.message || "Network error");
     } finally {
       setValidating(false);
     }
@@ -137,21 +154,19 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           try {
             setValidating(true);
             setValidationResult(null);
+            setValidationError(null);
             const res = await fetch("/api/providers/validate", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                provider: connection.provider,
-                apiKey: formData.apiKey,
-                ...(isAzure ? { providerSpecificData: azureData } : {}),
-                ...(isCloudflareAi ? { providerSpecificData: cloudflareData } : {}),
-              }),
+              body: JSON.stringify(buildValidationPayload()),
             });
             const data = await res.json();
             isValid = !!data.valid;
             setValidationResult(isValid ? "success" : "failed");
-          } catch {
+            setValidationError(isValid ? null : (data.error || "Validation failed"));
+          } catch (error) {
             setValidationResult("failed");
+            setValidationError(error?.message || "Network error");
           } finally {
             setValidating(false);
           }
@@ -245,9 +260,14 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
               </div>
             </div>
             {validationResult && (
-              <Badge variant={validationResult === "success" ? "success" : "error"}>
-                {validationResult === "success" ? "Valid" : "Invalid"}
-              </Badge>
+              <div className="flex flex-col gap-1">
+                <Badge variant={validationResult === "success" ? "success" : "error"}>
+                  {validationResult === "success" ? "Valid" : "Invalid"}
+                </Badge>
+                {validationError && validationResult !== "success" && (
+                  <span className="text-sm text-red-500">{validationError}</span>
+                )}
+              </div>
             )}
           </>
         )}
@@ -319,6 +339,7 @@ EditConnectionModal.propTypes = {
     priority: PropTypes.number,
     authType: PropTypes.string,
     provider: PropTypes.string,
+    defaultModel: PropTypes.string,
     providerSpecificData: PropTypes.object,
   }),
   proxyPools: PropTypes.arrayOf(PropTypes.shape({

@@ -17,6 +17,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
   const [checkModelId, setCheckModelId] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [validationError, setValidationError] = useState(null);
 
   useEffect(() => {
     if (node) {
@@ -54,6 +55,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
 
   const handleValidate = async () => {
     setValidating(true);
+    setValidationError(null);
     try {
       const res = await fetch("/api/provider-nodes/validate", {
         method: "POST",
@@ -62,13 +64,16 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
           baseUrl: formData.baseUrl,
           apiKey: checkKey,
           type: isAnthropic ? "anthropic-compatible" : "openai-compatible",
-          modelId: checkModelId.trim() || undefined
+          modelId: checkModelId.trim() || undefined,
+          apiType: formData.apiType
         }),
       });
       const data = await res.json();
       setValidationResult(data.valid ? "success" : "failed");
-    } catch {
+      setValidationError(data.valid ? null : (data.error || "Validation failed"));
+    } catch (error) {
       setValidationResult("failed");
+      setValidationError(error?.message || "Network error");
     } finally {
       setValidating(false);
     }
@@ -117,22 +122,27 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose,
             className="flex-1"
           />
           <div className="pt-6">
-            <Button onClick={handleValidate} disabled={!checkKey || validating || !formData.baseUrl.trim()} variant="secondary">
+            <Button onClick={handleValidate} disabled={!checkKey || validating || !formData.baseUrl.trim() || (!isAnthropic && !checkModelId.trim())} variant="secondary">
               {translate(validating ? "Checking..." : "Check")}
             </Button>
           </div>
         </div>
         <Input
-          label={translate("Model ID (optional)")}
+          label={translate("Model ID")}
           value={checkModelId}
           onChange={(e) => setCheckModelId(e.target.value)}
           placeholder="e.g. my-model-id"
-          hint={translate("If provider lacks /models endpoint, enter a model ID to validate via chat/completions instead.")}
+          hint={translate("Required for OpenAI-compatible fallback validation when /models is unavailable.")}
         />
         {validationResult && (
-          <Badge variant={validationResult === "success" ? "success" : "error"}>
-            {translate(validationResult === "success" ? "Valid" : "Invalid")}
-          </Badge>
+          <div className="flex flex-col gap-1">
+            <Badge variant={validationResult === "success" ? "success" : "error"}>
+              {translate(validationResult === "success" ? "Valid" : "Invalid")}
+            </Badge>
+            {validationError && validationResult !== "success" && (
+              <span className="text-sm text-red-500">{validationError}</span>
+            )}
+          </div>
         )}
         <div className="flex gap-2">
           <Button onClick={handleSubmit} fullWidth disabled={!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim() || saving}>

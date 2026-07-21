@@ -109,6 +109,50 @@ describe("Provider Validation API", () => {
       expect(chatRes.ok).toBe(true);
       expect(chatCall).toHaveBeenCalledOnce();
     });
+    it("should fallback to inference after an UND_ERR_CONNECT_TIMEOUT from /models", async () => {
+      const timeout = Object.assign(new Error("fetch failed"), {
+        cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
+      });
+      const chatCall = vi.fn().mockResolvedValue({ ok: true });
+      global.fetch = vi.fn().mockImplementation((url) => {
+        if (url.includes("/models")) return Promise.reject(timeout);
+        if (url.includes("/chat/completions")) return chatCall();
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      let modelsRes;
+      try {
+        modelsRes = await fetch("https://custom-provider.com/v1/models");
+      } catch {
+        // The route must continue with inference whenever a model is supplied.
+      }
+      expect(modelsRes).toBeUndefined();
+
+      const chatRes = await fetch("https://custom-provider.com/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "gpt-5.6-terra",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        }),
+      });
+      expect(chatRes.ok).toBe(true);
+      expect(chatCall).toHaveBeenCalledOnce();
+    });
+
+    it("should use Responses payload when Responses API is selected", () => {
+      const payload = {
+        model: "gpt-5.6-terra",
+        input: "ping",
+        max_output_tokens: 1,
+      };
+      expect(payload).toEqual({
+        model: "gpt-5.6-terra",
+        input: "ping",
+        max_output_tokens: 1,
+      });
+      expect(payload.messages).toBeUndefined();
+    });
     it("should return error when /models fails and no modelId", async () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
 

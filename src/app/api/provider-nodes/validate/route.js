@@ -69,7 +69,7 @@ const getChatErrorMessage = (status) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { baseUrl, apiKey, type, modelId } = body;
+    const { baseUrl, apiKey, type, modelId, apiType = "chat" } = body;
     const runtimeProfile = normalizeRuntimeProfile(body.runtimeProfile);
 
     if (!baseUrl || !apiKey) {
@@ -181,36 +181,37 @@ export async function POST(request) {
         headers: { "Authorization": `Bearer ${apiKey}` },
       });
     } catch (error) {
-      if (!modelId || !isRequestTimeout(error)) throw error;
+      // A slow or missing catalog must not invalidate a usable inference key.
+      if (!modelId) throw error;
     }
-    if (res?.ok) return NextResponse.json({ valid: true });
+    if (res?.ok) return NextResponse.json({ valid: true, method: "models" });
 
     // Auth errors - no point trying chat fallback
     if (res?.status === 401 || res?.status === 403) {
       return NextResponse.json({ valid: false, error: "API key unauthorized" });
     }
 
-    // Fallback: try chat/completions if modelId provided
+    // Fallback: probe the selected inference API when a model ID is available.
     if (modelId) {
-      const chatRes = await fetchWithTimeout(buildProviderEndpoint(normalizedBase, "/chat/completions", { runtimeProfile }), {
+      const usesResponsesApi = apiType === "responses";
+      const endpoint = usesResponsesApi ? "/responses" : "/chat/completions";
+      const inferenceRes = await fetchWithTimeout(buildProviderEndpoint(normalizedBase, endpoint, { runtimeProfile }), {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 1
-        })
-      });
-      if (chatRes.ok) {
-        return NextResponse.json({ valid: true, method: "chat" });
+        body: JSON.stringify(usesResponsesApi
+          ? { model: modelId, input: "ping", max_output_tokens: 1 }
+          : { model: modelId, messages: [{ role: "user", content: "ping" }], max_tokens: 1 })
+      }, 30000, 0);
+      if (inferenceRes.ok) {
+        return NextResponse.json({ valid: true, method: usesResponsesApi ? "responses" : "chat" });
       }
       return NextResponse.json({
         valid: false,
-        error: getChatErrorMessage(chatRes.status),
-        method: "chat"
+        error: getChatErrorMessage(inferenceRes.status),
+        method: usesResponsesApi ? "responses" : "chat"
       });
     }
 
