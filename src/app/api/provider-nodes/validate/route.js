@@ -38,7 +38,8 @@ const getErrorMessage = (error) => {
   if (error.cause?.code === "ECONNREFUSED") return "Connection refused - provider node offline or unreachable";
   if (error.cause?.code === "ENOTFOUND") return "DNS lookup failed - invalid domain or network issue";
   if (error.cause?.code === "ETIMEDOUT") return "Connection timeout - provider node too slow";
-  if (error.message.includes("timeout")) return "Request timeout (>10s) - provider node not responding";
+  if (String(error?.message || "").toLowerCase().includes("timeout")) return "Provider connection timed out from RouterDone server";
+  if (error.cause?.code === "UND_ERR_CONNECT_TIMEOUT") return "Provider connection timed out from RouterDone server";
   if (error.cause?.code === "CERT_HAS_EXPIRED") return "SSL certificate expired";
   if (error.cause?.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE") return "SSL certificate verification failed";
   if (error.cause?.code) return `Network error: ${error.cause.code}`;
@@ -174,6 +175,52 @@ export async function POST(request) {
     }
 
     // OpenAI Compatible Validation (Default)
+    // When a model is supplied, probe inference first. Catalog endpoints can be
+    // slow or absent even when the provider accepts inference requests.
+    const model = modelId?.trim();
+    const usesResponsesApi = apiType === "responses";
+    const inferenceMethod = usesResponsesApi ? "responses" : "chat";
+    const inferencePath = usesResponsesApi ? "/responses" : "/chat/completions";
+    const inferenceBody = usesResponsesApi
+      ? { model, input: "ping", max_output_tokens: 1 }
+      : { model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 };
+
+    if (model) {
+      try {
+        const inferenceRes = await fetchWithTimeout(
+          buildProviderEndpoint(normalizedBase, inferencePath, { runtimeProfile }),
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(inferenceBody),
+          },
+          30000,
+          1,
+        );
+        if (inferenceRes.ok) {
+          return NextResponse.json({ valid: true, method: inferenceMethod });
+        }
+        if (inferenceRes.status === 401 || inferenceRes.status === 403) {
+          return NextResponse.json({ valid: false, error: "API key unauthorized", method: inferenceMethod });
+        }
+        return NextResponse.json({
+          valid: false,
+          error: getChatErrorMessage(inferenceRes.status),
+          method: inferenceMethod,
+        });
+      } catch (error) {
+        return NextResponse.json({
+          valid: false,
+          error: getErrorMessage(error),
+          method: inferenceMethod,
+        });
+      }
+    }
+
+    // No model ID: use catalog validation only.
     const modelsUrl = buildProviderEndpoint(normalizedBase, "/models", { runtimeProfile });
     let res;
     try {
@@ -181,41 +228,13 @@ export async function POST(request) {
         headers: { "Authorization": `Bearer ${apiKey}` },
       });
     } catch (error) {
-      // A slow or missing catalog must not invalidate a usable inference key.
-      if (!modelId) throw error;
+      return NextResponse.json({ valid: false, error: getErrorMessage(error), method: "models" });
     }
-    if (res?.ok) return NextResponse.json({ valid: true, method: "models" });
-
-    // Auth errors - no point trying chat fallback
-    if (res?.status === 401 || res?.status === 403) {
-      return NextResponse.json({ valid: false, error: "API key unauthorized" });
+    if (res.ok) return NextResponse.json({ valid: true, method: "models" });
+    if (res.status === 401 || res.status === 403) {
+      return NextResponse.json({ valid: false, error: "API key unauthorized", method: "models" });
     }
-
-    // Fallback: probe the selected inference API when a model ID is available.
-    if (modelId) {
-      const usesResponsesApi = apiType === "responses";
-      const endpoint = usesResponsesApi ? "/responses" : "/chat/completions";
-      const inferenceRes = await fetchWithTimeout(buildProviderEndpoint(normalizedBase, endpoint, { runtimeProfile }), {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(usesResponsesApi
-          ? { model: modelId, input: "ping", max_output_tokens: 1 }
-          : { model: modelId, messages: [{ role: "user", content: "ping" }], max_tokens: 1 })
-      }, 30000, 0);
-      if (inferenceRes.ok) {
-        return NextResponse.json({ valid: true, method: usesResponsesApi ? "responses" : "chat" });
-      }
-      return NextResponse.json({
-        valid: false,
-        error: getChatErrorMessage(inferenceRes.status),
-        method: usesResponsesApi ? "responses" : "chat"
-      });
-    }
-
-    return NextResponse.json({ valid: false, error: res ? getModelsErrorMessage(res.status) : getModelsTimeoutMessage() });
+    return NextResponse.json({ valid: false, error: getModelsErrorMessage(res.status), method: "models" });
   } catch (error) {
     const errorMessage = getErrorMessage(error);
     console.error("Error validating provider node:", {

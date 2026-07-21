@@ -153,6 +153,35 @@ describe("Provider Validation API", () => {
       });
       expect(payload.messages).toBeUndefined();
     });
+    it("should validate a supplied model through inference without probing /models", async () => {
+      const calls = [];
+      global.fetch = vi.fn().mockImplementation((url) => {
+        calls.push(url);
+        if (url.includes("/chat/completions")) return Promise.resolve({ ok: true });
+        return Promise.reject(new Error("/models should not be called"));
+      });
+
+      const response = await fetch("https://custom-provider.com/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({
+          model: "gpt-5.6-luna",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        }),
+      });
+      expect(response.ok).toBe(true);
+      expect(calls).not.toContain("https://custom-provider.com/v1/models");
+    });
+
+    it("should expose a friendly message for an upstream connect timeout", () => {
+      const error = Object.assign(new Error("fetch failed"), {
+        cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
+      });
+      const message = error.cause?.code === "UND_ERR_CONNECT_TIMEOUT"
+        ? "Provider connection timed out from RouterDone server"
+        : "Network error";
+      expect(message).toBe("Provider connection timed out from RouterDone server");
+    });
     it("should return error when /models fails and no modelId", async () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
 
