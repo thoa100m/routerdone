@@ -6,8 +6,18 @@ FROM base AS builder
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
+# Copy package.json first so npm install layer is cached unless deps change.
 COPY package.json ./
 RUN npm install
+
+# Cache-bust: copy VERSION (bumped every release) BEFORE COPY . . so BuildKit
+# invalidates the source + build layers whenever the app version changes. This
+# prevents Dokploy from serving a stale build when the repo is re-cloned but a
+# cached COPY . . layer matches. npm install above stays cached (fast redeploy)
+# because it only depends on package.json.
+COPY VERSION ./
+ARG APP_VERSION=""
+RUN test -s VERSION || echo "${APP_VERSION:-unknown}" > VERSION
 
 COPY . ./
 ENV NEXT_TELEMETRY_DISABLED=1
