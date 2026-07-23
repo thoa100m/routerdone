@@ -9,6 +9,7 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { MODEL_FAILURE_BACKOFF_MAX_MS } from "../config/errorConfig.js";
 import { COMBO_REASONING_STREAM_FIRST_PRODUCTIVE_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import { getComboRotationState, setComboRotationState, resetComboRotation } from "@/lib/comboRotation";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -186,11 +187,6 @@ export function reorderByCapabilities(models, required) {
     .map((x) => x.m);
 }
 
-/**
- * Track rotation state per combo (for round-robin strategy)
- * @type {Map<string, { index: number, consecutiveUseCount: number }>}
- */
-const comboRotationState = new Map();
 // Trailing run of items after the last assistant/model turn = the current user
 // turn. It may span several messages (e.g. text + image split across blocks),
 // so we return all of them. History media (older turns) must not pin the combo
@@ -275,7 +271,7 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
 
   const rotationKey = comboName || "__default__";
   const normalizedStickyLimit = normalizeStickyLimit(stickyLimit);
-  const existingState = comboRotationState.get(rotationKey);
+  const existingState = getComboRotationState(rotationKey);
   const state = typeof existingState === "number"
     ? { index: existingState, consecutiveUseCount: 0 }
     : (existingState || { index: 0, consecutiveUseCount: 0 });
@@ -285,12 +281,12 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
   const nextUseCount = state.consecutiveUseCount + 1;
 
   if (nextUseCount >= normalizedStickyLimit) {
-    comboRotationState.set(rotationKey, {
+    setComboRotationState(rotationKey, {
       index: (currentIndex + 1) % models.length,
       consecutiveUseCount: 0,
     });
   } else {
-    comboRotationState.set(rotationKey, {
+    setComboRotationState(rotationKey, {
       index: currentIndex,
       consecutiveUseCount: nextUseCount,
     });
@@ -299,14 +295,7 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
   return rotatedModels;
 }
 
-/**
- * Reset in-memory rotation state when combo/settings change
- * @param {string} [comboName] - Combo name to reset; omit to clear all
- */
-export function resetComboRotation(comboName) {
-  if (comboName) comboRotationState.delete(comboName);
-  else comboRotationState.clear();
-}
+export { resetComboRotation };
 
 /**
  * Reset the in-memory combo model cooldown map. Test-only helper so the

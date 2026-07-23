@@ -56,7 +56,13 @@ export async function updateCombo(id, data) {
   db.transaction(() => {
     const row = db.get(`SELECT * FROM combos WHERE id = ?`, [id]);
     if (!row) return;
-    const merged = { ...rowToCombo(row), ...data, updatedAt: new Date().toISOString() };
+    const current = rowToCombo(row);
+    const merged = {
+      ...current,
+      ...data,
+      kind: data.kind === undefined ? current.kind : data.kind,
+      updatedAt: new Date().toISOString(),
+    };
     db.run(
       `UPDATE combos SET name = ?, kind = ?, models = ?, updatedAt = ? WHERE id = ?`,
       [merged.name, merged.kind, stringifyJson(merged.models || []), merged.updatedAt, id]

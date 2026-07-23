@@ -139,9 +139,11 @@ describe("DB SQLite layer — public API parity", () => {
     expect(c.models).toEqual(["m1", "m2"]);
     const byName = await sqliteDb.getComboByName("combo1");
     expect(byName.id).toBe(c.id);
-    await sqliteDb.updateCombo(c.id, { models: ["m3"] });
+    // The dashboard edit form sends name and models, but not kind.
+    await sqliteDb.updateCombo(c.id, { name: "combo1", models: ["m3"] });
     const updated = await sqliteDb.getComboById(c.id);
     expect(updated.models).toEqual(["m3"]);
+    expect(updated.kind).toBe("fallback");
     expect(await sqliteDb.deleteCombo(c.id)).toBe(true);
   });
 
